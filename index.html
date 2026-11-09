@@ -168,14 +168,26 @@
     <div style="margin-top:6px;">
       <label>一日→24hr 換算係數（僅用於只有日資料之站；有時資料者直接取連續 24hr）</label>
       <select id="select_dayConv">
-        <option value="1.15" selected>北區 1.15</option>
-        <option value="1.14">中區 1.14</option>
-        <option value="1.14">南區 1.14</option>
-        <option value="1.17">東區 1.17</option>
-        <option value="1.00">不換算 1.00</option>
+        <option value="AUTO" selected>自動判定（依採用雨量站所在縣市）</option>
+        <option value="北">北區 1.15</option>
+        <option value="中">中區 1.14</option>
+        <option value="南">南區 1.14</option>
+        <option value="東">東區 1.17</option>
+        <option value="無">不換算 1.00</option>
       </select>
+      <div id="dayConvAutoNote" style="font-size:11px; color:#7dd3fc; margin-top:3px; line-height:1.45;"></div>
+      <details style="font-size:11px; color:#94a3b8; margin-top:2px;">
+        <summary style="cursor:pointer;">表 3-3 台灣地區年最大日暴雨量修正係數（出處）</summary>
+        <table style="width:100%; margin:3px 0; font-size:11px;"><tr><th>區域</th><th>北</th><th>中</th><th>南</th><th>東</th></tr><tr><td>修正係數</td><td>1.15</td><td>1.14</td><td>1.14</td><td>1.17</td></tr></table>
+        出處：經濟部水利署民國 96 年「水文業務現代化綜合計畫」報告之分析值（係經由規劃報告引用，原報告未逐一核對）；另參考民國 101 年 8 月「水文分析報告審查作業須知」。縣市→區域之歸類為本工具之假設：北＝基隆/臺北/新北/桃園/新竹/苗栗；中＝臺中/彰化/南投/雲林；南＝嘉義/臺南/高雄/屏東；東＝宜蘭/花蓮/臺東（離島以最近區域處理，請手動確認）。
+      </details>
     </div>
     <div id="rainBasisPanel" style="font-size:11.5px; margin-top:6px; line-height:1.5;">雨量樣本與雨型說明：上傳雨量 Excel 並完成控制點後顯示</div>
+    <details id="stationFreqBox" style="margin-top:6px; font-size:11.5px; color:#cbd5e1; display:none;">
+      <summary style="cursor:pointer; color:#7dd3fc;">各雨量站個別最大 24hr 暴雨頻率分析成果表（五種分布）與綜合評估</summary>
+      <div id="stationFreqBody" style="overflow:auto; margin-top:4px;"></div>
+    </details>
+    <div id="cumCurveBox" style="margin-top:6px; background:#fff; border-radius:6px; padding:4px; overflow:auto; display:none;"></div>
     <div id="idfFormulaBox" style="font-size:11.5px; color:#38bdf8; margin-top:2px;">無因次降雨強度公式：點選控制點後自動計算</div>
   </div>
 
@@ -209,6 +221,22 @@
         <label>泥砂混合率 α (%)</label>
         <input type="number" id="input_alpha" value="20" min="0" max="50" step="5" />
       </div>
+    </div>
+    <div class="grid-4" style="margin-top:6px;">
+      <div style="grid-column: span 2;">
+        <label>單位歷線法（A ≥ 1,000 ha 採用之歷線；報告兩法並列比較）</label>
+        <select id="select_uhMethod">
+          <option value="TRI" selected>修正三角型單位歷線（預設）</option>
+          <option value="SCS">SCS 無因次單位歷線</option>
+        </select>
+      </div>
+      <div style="grid-column: span 2;">
+        <label>CN 值（選填；留空＝有效雨量 = C × 降雨）</label>
+        <input type="number" id="input_CN" value="" placeholder="留空不啟用" min="30" max="100" step="1" />
+      </div>
+    </div>
+    <div style="font-size:11px; color:#94a3b8; line-height:1.5; margin-top:3px;">
+      ※ 預設以逕流係數 C 計算有效雨量（Re = C × P）。CN 法需依土壤水文分類、土地利用與前期含水量（AMC）判定，本工具無此資料，故僅提供手動輸入：填入 CN 後，歷線演算改用 SCS 逕流公式 S = 25400/CN − 254、Ia = 0.2S、Pe = (P − Ia)² / (P − Ia + S)（逐時累積雨量計算），並同時影響兩種單位歷線；合理化公式仍使用 C。清空 CN 即恢復 C 法。
     </div>
 
     <!-- 農村水保署土石流潛勢溪流設定區塊 -->
@@ -244,6 +272,26 @@
     <div class="grid-2" style="margin-top:8px;">
       <button id="btnRunHydrology" class="success" style="margin-bottom:0;">重新執行水文與土石流演算</button>
       <button id="btnGenerateReport" class="report-btn" style="margin-bottom:0;">📄 產出完整水文與土砂分析報告</button>
+    </div>
+  </div>
+
+  <div class="card" id="multiPointCard">
+    <h3><span>多控制點洪峰（手動點選，僅算各點洪峰）</span><span id="cpCountBadge" class="badge">0 點</span></h3>
+    <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:#fde68a; font-weight:bold;">
+      <input type="checkbox" id="chkMultiMode" style="width:auto; margin:0;" />
+      啟用多控制點模式（開啟後，在地圖上每點一個主流／支流控制點就新增一點）
+    </label>
+    <div style="font-size:11px; color:#94a3b8; line-height:1.5; margin:4px 0;">
+      每個控制點各自：DEM 劃設集水區 → 徐昇權重 → 24hr 暴雨頻率分析 → 設計雨量 → 洪峰流量（共用上方 C、α、CN、歷線法等參數）。各點洪峰為獨立結果，<strong>不做歷線匯流演算、也不可直接相加</strong>（支流匯入主流處之匯流需另行以歷線演算）。點列表中的點可切換檢視、修改雨量站勾選，系統會自動更新該點。
+    </div>
+    <div id="cpList" style="max-height:200px; overflow:auto; font-size:11.5px;"></div>
+    <div class="grid-2" style="margin-top:6px;">
+      <button id="btnCpRecalc" class="secondary" style="margin-bottom:0;">重算全部控制點</button>
+      <button id="btnCpClear" class="secondary" style="margin-bottom:0;">清除全部控制點</button>
+    </div>
+    <div class="grid-2" style="margin-top:6px;">
+      <button id="btnCpReport" class="report-btn" style="margin-bottom:0;">📄 多控制點洪峰彙整報告</button>
+      <button id="btnCpCsv" class="secondary" style="margin-bottom:0;">下載彙整 CSV</button>
     </div>
   </div>
 </div>
@@ -817,6 +865,12 @@ let currentThiessenList = [];
 let currentWatershedParams = null;
 let lastReportData = null;
 let lastHydroReportCSV = "";
+// ---- 多控制點模式（手動點選；各點獨立計算洪峰，不做匯流演算）----
+let controlPoints = [];
+let activePointId = null;
+let restoringPoint = false;
+let cpSeq = 0;
+const isMultiMode = () => { const el = document.getElementById('chkMultiMode'); return !!(el && el.checked); };
 
 // ============================================================================
 // 2. 初始化地圖與圖層 (含農村水保署土石流潛勢溪流標記圖層)
@@ -828,6 +882,7 @@ const layerWatershed = L.layerGroup().addTo(map);
 const layerThiessen = L.layerGroup().addTo(map);
 const layerStations = L.layerGroup().addTo(map);
 const layerDebrisStreams = L.layerGroup().addTo(map);
+const layerControlPoints = L.layerGroup().addTo(map);
 
 const baseLayers = {
   "臺灣通用電子地圖 (國土測繪中心等高線版)": L.tileLayer('https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}', {
@@ -1476,6 +1531,10 @@ function applyWatershedGeometry({ feature, L_m, H_m, channelCoords, outletLatLon
     warnings.length ? "warn" : "normal"
   );
 
+  if (!isMultiMode() && !restoringPoint) activePointId = null;
+  if (isMultiMode() && !restoringPoint) {
+    registerControlPoint({ feature, L_m: flowLengthM, H_m: elevDiffM, channelCoords: channelCoords || null, outletLatLon: [outLat, outLon], clickLatLon: clickLatLon || null });
+  }
   // 徐昇切割與水文演算放在最後；若勾選站缺雨量資料，演算會改寫狀態列提示先上傳 Excel
   buildThiessenForWatershed(feature, polyAreaKm2);
 }
@@ -1554,6 +1613,7 @@ function clearHydrologyOutputs(msg) {
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   lastReportData = null;
   lastHydroReportCSV = "";
+  if (typeof syncActiveControlPoint === 'function') syncActiveControlPoint();
 }
 
 // 核心功能：當使用者勾選/取消雨量站時，僅以「目前勾選的雨量站」重新切割 Voronoi 徐昇多邊形，
@@ -2116,7 +2176,24 @@ function calcDimensionlessIntensity(P_annual_mm, Tc_hr, T_yr) {
   return { I_T, I60_25, A, B, C, G, H };
 }
 
-function computeModifiedTriangularUH(P24_mm, stormPct24, A_km2, Tc_hr, C_runoff) {
+// 有效降雨：C 法（Re = C × P）或手動 CN 法（SCS 逕流公式，逐時累積雨量）
+function effectiveHourlyRain(P24_mm, stormPct24, C_runoff, CN) {
+  const hourlyP = stormPct24.map(pct => P24_mm * (pct / 100));
+  if (CN && CN >= 30 && CN <= 100) {
+    const S = 25400 / CN - 254, Ia = 0.2 * S;
+    let cum = 0, prevPe = 0;
+    const hourlyPe = hourlyP.map(p => {
+      cum += p;
+      const pe = cum > Ia ? Math.pow(cum - Ia, 2) / (cum - Ia + S) : 0;
+      const d = pe - prevPe; prevPe = pe; return d;
+    });
+    return { hourlyP, hourlyPe, PeTotal: prevPe, mode: "CN", CN, S, Ia };
+  }
+  const hourlyPe = hourlyP.map(p => p * C_runoff);
+  return { hourlyP, hourlyPe, PeTotal: hourlyPe.reduce((a, b) => a + b, 0), mode: "C", C: C_runoff };
+}
+
+function computeModifiedTriangularUH(P24_mm, stormPct24, A_km2, Tc_hr, C_runoff, CN) {
   const dt = 0.25;
   const totalHours = 36;
   const nSteps = Math.round(totalHours / dt);
@@ -2127,8 +2204,8 @@ function computeModifiedTriangularUH(P24_mm, stormPct24, A_km2, Tc_hr, C_runoff)
   const Tb = +(Tp + Tr).toFixed(2);
   const unitQp_10mm = +(0.208 * A_km2 * 10 / Tp).toFixed(1);
 
-  const hourlyP = stormPct24.map(pct => P24_mm * (pct / 100));
-  const hourlyPe = hourlyP.map(p => p * C_runoff);
+  const eff = effectiveHourlyRain(P24_mm, stormPct24, C_runoff, CN);
+  const hourlyPe = eff.hourlyPe;
 
   const timeAxis = [];
   const Q_raw = new Array(nSteps).fill(0);
@@ -2163,7 +2240,61 @@ function computeModifiedTriangularUH(P24_mm, stormPct24, A_km2, Tc_hr, C_runoff)
   const maxQ = Math.max(...Q);
   const peakIdx = Q.indexOf(maxQ);
 
-  return { timeAxis, Pe_bar, Q, Qp: maxQ, peakTimeHr: timeAxis[peakIdx], Tp, Tb, unitQp_10mm };
+  return { method: "TRI", timeAxis, Pe_bar, Q, Qp: maxQ, peakTimeHr: timeAxis[peakIdx], Tp, Tb, unitQp_10mm, PeTotal: eff.PeTotal, eff };
+}
+
+// SCS（NRCS）無因次單位歷線：時間比 t/Tp 與流量比 q/Qp 之標準曲線
+// 數值來源：USDA NRCS National Engineering Handbook Part 630 Hydrology, Ch.16（無因次單位歷線座標表）；
+// 水利署「排水計畫書」規定之附表五原文未取得，此表為 NRCS 標準座標，使用前請與附表五核對。
+const SCS_UH_RATIOS = [
+  [0.0, 0.000], [0.1, 0.030], [0.2, 0.100], [0.3, 0.190], [0.4, 0.310], [0.5, 0.470], [0.6, 0.660], [0.7, 0.820],
+  [0.8, 0.930], [0.9, 0.990], [1.0, 1.000], [1.1, 0.990], [1.2, 0.930], [1.3, 0.860], [1.4, 0.780], [1.5, 0.680],
+  [1.6, 0.560], [1.7, 0.460], [1.8, 0.390], [1.9, 0.330], [2.0, 0.280], [2.2, 0.207], [2.4, 0.147], [2.6, 0.107],
+  [2.8, 0.077], [3.0, 0.055], [3.2, 0.040], [3.4, 0.029], [3.6, 0.021], [3.8, 0.015], [4.0, 0.011], [4.5, 0.005], [5.0, 0.000]
+];
+function scsRatio(r) {
+  if (r <= 0 || r >= 5) return 0;
+  for (let i = 1; i < SCS_UH_RATIOS.length; i++) {
+    const [x1, y1] = SCS_UH_RATIOS[i];
+    if (r <= x1) { const [x0, y0] = SCS_UH_RATIOS[i - 1]; return y0 + (y1 - y0) * (r - x0) / (x1 - x0); }
+  }
+  return 0;
+}
+// 曲線下面積 / (Tp·Qp)（理論約 1.333，三角形為 1.335）
+const SCS_AREA_RATIO = (() => { let a = 0; for (let i = 1; i < SCS_UH_RATIOS.length; i++) a += (SCS_UH_RATIOS[i][0] - SCS_UH_RATIOS[i - 1][0]) * (SCS_UH_RATIOS[i][1] + SCS_UH_RATIOS[i - 1][1]) / 2; return a; })();
+
+function computeSCSUnitHydrograph(P24_mm, stormPct24, A_km2, Tc_hr, C_runoff, CN) {
+  const dt = 0.25;
+  const D_unit = Math.max(0.1, +(0.135 * Tc_hr).toFixed(2));
+  const Tlag = +(0.6 * Tc_hr).toFixed(3);
+  const Tp = +(D_unit / 2 + Tlag).toFixed(2);
+  const Tb = +(2.67 * Tp).toFixed(2);
+  const Qp1 = 0.208 * A_km2 / Tp;                       // 每 1 mm 有效降雨之單位洪峰
+  const unitQp_10mm = +(Qp1 * 10).toFixed(1);
+  const totalHours = Math.max(36, Math.ceil(24 + 5 * Tp + 1));
+  const nSteps = Math.round(totalHours / dt);
+
+  const eff = effectiveHourlyRain(P24_mm, stormPct24, C_runoff, CN);
+  const hourlyPe = eff.hourlyPe;
+  const nSub = 10, dSub = 1.0 / nSub;
+  const timeAxis = [], Q = new Array(nSteps).fill(0), Pe_bar = new Array(nSteps).fill(0);
+  for (let i = 0; i < nSteps; i++) {
+    const t = +(i * dt).toFixed(2);
+    timeAxis.push(t.toFixed(1));
+    const hrIdx = Math.floor(t);
+    if (hrIdx < 24) Pe_bar[i] = +(hourlyPe[hrIdx] * dt).toFixed(2);
+    let q = 0;
+    for (let h = 0; h < 24; h++) {
+      if (t <= h || hourlyPe[h] <= 0) continue;
+      for (let m = 0; m < nSub; m++) {
+        const tau = t - (h + m * dSub);
+        if (tau > 0) q += hourlyPe[h] * (Qp1 / nSub) * scsRatio(tau / Tp);
+      }
+    }
+    Q[i] = +q.toFixed(2);
+  }
+  const maxQ = Math.max(...Q), peakIdx = Q.indexOf(maxQ);
+  return { method: "SCS", timeAxis, Pe_bar, Q, Qp: maxQ, peakTimeHr: timeAxis[peakIdx], Tp, Tb, Tlag, D_unit, unitQp_10mm, PeTotal: eff.PeTotal, eff, areaRatio: SCS_AREA_RATIO };
 }
 
 
@@ -2174,14 +2305,40 @@ function computeModifiedTriangularUH(P24_mm, stormPct24, A_km2, Tc_hr, C_runoff)
 //      否則（僅內建舊資料）→ 各站年最大值依權重加權（舊法）。
 //   C. 雨型：由有時資料之站，先依徐昇權重加成流域逐時雨量，列出各年最大 24hr 暴雨供勾選（預設前 6 場）。
 // ============================================================================
-function getDayConvFactor() {
-  const el = document.getElementById('select_dayConv');
-  const v = el ? parseFloat(el.value) : 1.15;
-  return isFinite(v) && v > 0 ? v : 1.15;
+const DAYCONV_TABLE = { "北": 1.15, "中": 1.14, "南": 1.14, "東": 1.17, "無": 1.00 };
+const DAYCONV_SOURCE = "經濟部水利署民國 96 年「水文業務現代化綜合計畫」報告（表 3-3 台灣地區年最大日暴雨量修正係數）；另參考民國 101 年 8 月「水文分析報告審查作業須知」";
+const COUNTY_REGION = {
+  "基隆":"北","臺北":"北","台北":"北","新北":"北","桃園":"北","新竹":"北","苗栗":"北","連江":"北","金門":"南",
+  "臺中":"中","台中":"中","彰化":"中","南投":"中","雲林":"中",
+  "嘉義":"南","臺南":"南","台南":"南","高雄":"南","屏東":"南","澎湖":"南",
+  "宜蘭":"東","花蓮":"東","臺東":"東","台東":"東"
+};
+function countyToRegion(c) {
+  if (!c) return null;
+  for (const k of Object.keys(COUNTY_REGION)) if (String(c).indexOf(k) === 0) return COUNTY_REGION[k];
+  return null;
 }
-function getDayConvLabel() {
+// 依徐昇權重多數決自動判定區域；回傳 {region, factor, auto, shares:{北:..}, label}
+function getDayConvInfo(useList) {
   const el = document.getElementById('select_dayConv');
-  return el ? el.options[el.selectedIndex].text : "北區 1.15";
+  const sel = el ? el.value : "AUTO";
+  const shares = {};
+  (useList || []).forEach(st => { const r = countyToRegion(st.county); if (r) shares[r] = (shares[r] || 0) + (st.weight || 0); });
+  let autoRegion = null, best = -1;
+  Object.keys(shares).forEach(r => { if (shares[r] > best) { best = shares[r]; autoRegion = r; } });
+  let region, auto = false;
+  if (sel === "AUTO" || !(sel in DAYCONV_TABLE)) { region = autoRegion || "北"; auto = true; } else region = sel;
+  const factor = DAYCONV_TABLE[region] != null ? DAYCONV_TABLE[region] : 1.15;
+  const label = region === "無" ? "不換算 1.00" : `${region}區 ${factor.toFixed(2)}`;
+  return { region, factor, auto, autoRegion, shares, label, fallback: auto && !autoRegion };
+}
+function renderDayConvNote(info) {
+  const el = document.getElementById('dayConvAutoNote');
+  if (!el) return;
+  const sh = Object.keys(info.shares).map(r => `${r}區 ${(info.shares[r] * 100).toFixed(0)}%`).join("、");
+  el.innerHTML = info.auto
+    ? `自動判定：<strong>${info.region}區 ${info.factor.toFixed(2)}</strong>（徐昇權重：${sh || '無縣市資料'}${info.fallback ? '；縣市無法歸類，暫用北區' : ''}），可於上方手動改。`
+    : `手動指定：<strong>${info.label}</strong>（自動判定為 ${info.autoRegion ? info.autoRegion + '區' : '無法判定'}）。`;
 }
 
 function stationHasHourly(db) { return !!(db && db.hourly && db.hourly.t && db.hourly.t.length >= 4380); }
@@ -2248,14 +2405,16 @@ function annualMaxDailyWeighted(items) {
 let basinRainCache = { key: "", val: null };
 // 回傳 { method, methodNote, years[], sample24[], hourly: {items, S, candidates[], usedStations[], excluded[]} | null }
 function buildBasinRainBasis(useList) {
-  const conv = getDayConvFactor();
-  const key = `${rainDataVersion}|${conv}|` + useList.map(s => `${s.id}:${s.weight.toFixed(5)}`).join(",");
+  const convInfo = getDayConvInfo(useList);
+  const conv = convInfo.factor;
+  renderDayConvNote(convInfo);
+  const key = `${rainDataVersion}|${convInfo.region}|` + useList.map(s => `${s.id}:${s.weight.toFixed(5)}`).join(",");
   if (basinRainCache.key === key) return basinRainCache.val;
 
   const all = useList.map(st => ({ st, db: getStationDB(st), w: st.weight }));
   const hItems = all.filter(x => stationHasHourly(x.db));
   const dItems = all.filter(x => stationHasDaily(x.db));
-  const res = { method: "legacy", methodNote: "", years: [], sample24: [], hourly: null };
+  const res = { method: "legacy", methodNote: "", years: [], sample24: [], hourly: null, convInfo };
 
   // 逐時流域序列與候選暴雨（僅由有時資料之站構成）
   if (hItems.length > 0) {
@@ -2291,7 +2450,7 @@ function buildBasinRainBasis(useList) {
     res.sample24 = rows.map(r => +(r.value * conv).toFixed(1));
     res.dailyRows = rows;
     res.conv = conv;
-    res.methodNote = `各站逐日雨量依徐昇權重於「同一天」加權，逐年取最大日雨量，再乘以一日→24 小時換算係數 ${conv.toFixed(2)}（${getDayConvLabel()}；水利署 96 年水文業務現代化綜合計畫）。`;
+    res.methodNote = `各站逐日雨量依徐昇權重於「同一天」加權，逐年取最大日雨量，再乘以一日→24 小時換算係數 ${conv.toFixed(2)}（${convInfo.label}${convInfo.auto ? '，依採用站縣市自動判定' : '，手動指定'}；出處：水利署 96 年水文業務現代化綜合計畫表 3-3）。`;
   } else {
     const yearMap = {};
     all.forEach(({ db, w }) => {
@@ -2319,6 +2478,84 @@ function resolveStormSelection(basis) {
   return cands.filter(c => stormSel.keys.has(c.key)).sort((a, b) => b.total - a.total);
 }
 
+// 暴雨場次 24 小時累積雨量曲線圖（SVG；x=1~24 hr，y=累積百分比；每場一條細線＋設計雨型粗線）
+function cumulativeCurveSVG(events, pattern, W, Hh) {
+  W = W || 640; Hh = Hh || 330;
+  const m = { l: 46, r: 14, t: 16, b: 76 }, pw = W - m.l - m.r, ph = Hh - m.t - m.b;
+  const X = h => m.l + (h / 24) * pw, Y = v => m.t + (1 - v / 100) * ph;
+  const palette = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#a16207", "#db2777", "#4d7c0f", "#475569"];
+  const cum = arr => { const tot = arr.reduce((a, b) => a + b, 0) || 1; let c = 0; return arr.map(v => (c += v) / tot * 100); };
+  let g = "";
+  for (let v = 0; v <= 100; v += 20) g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e2e8f0"/><text x="${m.l - 6}" y="${Y(v) + 4}" font-size="11" text-anchor="end" fill="#334155">${v}</text>`;
+  for (let h = 0; h <= 24; h += 2) g += `<line x1="${X(h)}" x2="${X(h)}" y1="${m.t}" y2="${m.t + ph}" stroke="#f1f5f9"/><text x="${X(h)}" y="${m.t + ph + 15}" font-size="11" text-anchor="middle" fill="#334155">${h}</text>`;
+  const pts = c => [`${X(0)},${Y(0)}`].concat(c.map((v, j) => `${X(j + 1).toFixed(1)},${Y(v).toFixed(1)}`)).join(" ");
+  let lines = "", legend = "";
+  events.forEach((e, i) => {
+    const col = palette[i % palette.length];
+    lines += `<polyline points="${pts(cum(e.hourly))}" fill="none" stroke="${col}" stroke-width="1.4" opacity="0.85"/>`;
+  });
+  const items = events.map((e, i) => ({ col: palette[i % palette.length], t: `${e.startLabel.slice(0, 10)} (${e.total.toFixed(0)}mm)`, w: 1.4 })).concat([{ col: "#000", t: "設計雨型（同位序）", w: 3.2 }]);
+  const colW = Math.floor(pw / 3);
+  items.forEach((it, i) => {
+    const x = m.l + (i % 3) * colW, y = m.t + ph + 48 + Math.floor(i / 3) * 14;
+    legend += `<line x1="${x}" x2="${x + 18}" y1="${y - 3}" y2="${y - 3}" stroke="${it.col}" stroke-width="${it.w}"/><text x="${x + 22}" y="${y}" font-size="10" fill="#0f172a">${it.t}</text>`;
+  });
+  const design = `<polyline points="${pts(cum(pattern))}" fill="none" stroke="#000" stroke-width="3.2"/>`;
+  const Hfull = Hh + Math.max(0, Math.ceil(items.length / 3) - 2) * 14;
+  return `<svg width="${W}" height="${Hfull}" viewBox="0 0 ${W} ${Hfull}" xmlns="http://www.w3.org/2000/svg" style="background:#fff;font-family:sans-serif;">${g}<rect x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="none" stroke="#475569"/>${lines}${design}<text x="${m.l + pw / 2}" y="${m.t + ph + 30}" font-size="11" text-anchor="middle" fill="#0f172a">時間 (hr)</text>${legend}<text x="12" y="${m.t + ph / 2}" font-size="11" fill="#0f172a" transform="rotate(-90 12 ${m.t + ph / 2})" text-anchor="middle">累積雨量百分比 (%)</text></svg>`;
+}
+
+// ---- 各雨量站個別頻率分析（對照規劃報告：各站先列成果表，最後再綜合評估）----
+const stationFreqCache = new Map();
+function computeStationFrequencies(useList, convInfo) {
+  return useList.map(st => {
+    const db = getStationDB(st);
+    const key = `${rainDataVersion}|${st.id}|${convInfo.region}`;
+    if (stationFreqCache.has(key)) return { st, ...stationFreqCache.get(key) };
+    let years = [], sample = [], method = "", note = "";
+    if (stationHasHourly(db)) {
+      const S = buildWeightedHourlySeries([{ db, w: 1 }]);
+      const wins = annualMax24Windows(S);
+      years = wins.map(w => String(w.year)); sample = wins.map(w => +w.total.toFixed(1));
+      method = "逐時資料連續 24 小時最大";
+    } else if (stationHasDaily(db)) {
+      const rows = annualMaxDailyWeighted([{ db, w: 1 }]);
+      years = rows.map(r => String(r.year)); sample = rows.map(r => +(r.value * convInfo.factor).toFixed(1));
+      method = `逐日最大 × ${convInfo.factor.toFixed(2)}`;
+    } else {
+      years = Object.keys(db.ams24ByYear || {}).sort();
+      sample = years.map(y => +db.ams24ByYear[y]);
+      method = "內建年最大值（舊資料）";
+    }
+    let freq = null;
+    if (sample.length >= 8) { try { freq = analyzeStandardFrequency(sample); } catch (e) { note = "頻率分析失敗：" + e.message; } }
+    else note = `樣本僅 ${sample.length} 年，不足 8 年，不做頻率分析`;
+    const out = { years, sample, method, freq, note };
+    stationFreqCache.set(key, out);
+    return { st, ...out };
+  });
+}
+function stationFreqTablesHTML(list, selectedCode, tableStyle) {
+  const names = { LN2: "Log-Normal II", LN3: "Log-Normal III", PT3: "Pearson III", LP3: "Log-Pearson III", GUMBEL: "Extreme I" };
+  return list.map(x => {
+    const head = `<strong>${x.st.name}${x.st.withdrawn ? '(撤銷站)' : ''}</strong>（${x.st.id}；權重 ${(x.st.weight * 100).toFixed(1)}%；${x.method}；${x.sample.length} 年${x.sample.length ? '，' + x.years[0] + '–' + x.years[x.years.length - 1] : ''}）`;
+    if (!x.freq) return `<div style="margin:6px 0;">${head}<div style="color:#b45309;">${x.note || '無資料'}</div></div>`;
+    const rows = Object.values(x.freq.results).map(r => {
+      const best = r.code === x.freq.bestCode;
+      return `<tr style="${best ? 'font-weight:bold;background:#fef9c3;color:#111;' : ''}"><td style="text-align:left;">${best ? '★ ' : ''}${names[r.code] || r.name}</td><td>${r.chiSq.toFixed(2)}${r.pass ? '' : '✗'}</td><td>${r.rankW + r.rankH}</td>${RETURN_PERIODS.map(T => `<td>${r.quantiles[T].toFixed(1)}</td>`).join('')}</tr>`;
+    }).join('');
+    return `<div style="margin:8px 0;">${head}<table ${tableStyle || ''}><thead><tr><th>機率分布</th><th>卡方</th><th>SE序位和</th>${RETURN_PERIODS.map(T => `<th>${T}年</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table><div style="font-size:11px;">★＝該站依卡方檢定通過＋SE序位和最小之最佳分布；✗＝卡方未通過。</div></div>`;
+  }).join('');
+}
+function stationFreqSummaryText(list, selectedCode) {
+  const names = { LN2: "LN2", LN3: "LN3", PT3: "PT3", LP3: "LP3", GUMBEL: "EV1" };
+  const cnt = {};
+  list.forEach(x => { if (x.freq) cnt[x.freq.bestCode] = (cnt[x.freq.bestCode] || 0) + 1; });
+  const parts = Object.keys(cnt).map(c => `${names[c]} ${cnt[c]} 站`).join("、");
+  return parts ? `各站個別最佳分布統計：${parts}。` : "";
+}
+
+let currentCumNote = "";
 function renderRainBasisPanel(basis, selected) {
   const el = document.getElementById('rainBasisPanel');
   if (!el) return;
@@ -2398,11 +2635,30 @@ function runFrequencyAndHydrology() {
   } else {
     stormPattern24 = [...DEFAULT_SAME_RANK_PCT_24HR];
   }
+  {
+    const cb = document.getElementById('cumCurveBox');
+    if (cb) {
+      if (selectedEvents.length > 0) {
+        cb.style.display = 'block';
+        cb.innerHTML = `<div style="color:#0f172a;font-size:12px;font-weight:bold;margin:2px 4px;">暴雨場次 24 小時累積雨量曲線（細線＝各場，粗黑線＝設計雨型；x：小時，y：累積 %）</div>` + cumulativeCurveSVG(selectedEvents, stormPattern24, 640, 330);
+      } else { cb.style.display = 'none'; cb.innerHTML = ''; }
+    }
+  }
 
   const freq24 = analyzeStandardFrequency(sample24);
   const userChoice = document.getElementById('distSelect').value;
   const selectedCode = userChoice === "AUTO" ? freq24.bestCode : userChoice;
   const targetT = parseInt(document.getElementById('returnPeriodSelect').value);
+  const stationFreqs = computeStationFrequencies(useList, basis.convInfo);
+  {
+    const box = document.getElementById('stationFreqBox'), body = document.getElementById('stationFreqBody');
+    if (box && body) {
+      box.style.display = 'block';
+      const sum = stationFreqSummaryText(stationFreqs, selectedCode);
+      body.innerHTML = stationFreqTablesHTML(stationFreqs, selectedCode, 'style="width:100%;border-collapse:collapse;font-size:11px;" border="1"') +
+        `<div style="margin-top:4px;color:#fde68a;"><strong>綜合評估：</strong>${sum}流域徐昇加權樣本（上方頻率表）最佳分布為 ${freq24.bestCode}，目前全流域採用 <strong>${selectedCode}</strong>（${userChoice === 'AUTO' ? '自動依檢定與 SE 擇優' : '使用者指定'}），並將此單一分布套用至整個集水區之設計雨量。</div>`;
+    }
+  }
 
   const bestDistBadge = document.getElementById('bestDistBadge');
   if (freq24.results[selectedCode].pass) {
@@ -2445,11 +2701,14 @@ function runFrequencyAndHydrology() {
     `無因次降雨強度：I<sub>60</sub><sup>25</sup>=${idfTarget.I60_25.toFixed(2)}, a=${idfTarget.A.toFixed(2)} (迴歸係數，非集水區面積), B=55, C=${idfTarget.C.toFixed(3)} → <strong>I<sub>${targetT}</sub> = ${idfTarget.I_T.toFixed(2)} mm/hr</strong>`;
 
   const C_coef = parseFloat(document.getElementById('input_C').value) || 0.75;
+  const cnRaw = parseFloat(document.getElementById('input_CN').value);
+  const CN_val = (isFinite(cnRaw) && cnRaw >= 30 && cnRaw <= 100) ? cnRaw : null;
+  const uhMethod = document.getElementById('select_uhMethod').value === "SCS" ? "SCS" : "TRI";
   const alphaPct = (parseFloat(document.getElementById('input_alpha').value) || 20) / 100;
   const A_ha = currentWatershedParams.A_ha, A_km2 = currentWatershedParams.A_km2;
 
-  const rowIntensities = [], rowRat = [], rowTri = [];
-  let targetUhRes = null, targetRatQp = 0;
+  const rowIntensities = [], rowRat = [], rowTri = [], rowScs = [];
+  let triRes = null, scsRes = null, targetRatQp = 0;
 
   RETURN_PERIODS.forEach(T => {
     const idfT = calcDimensionlessIntensity(P_annual, rz.Tc_hr, T);
@@ -2458,14 +2717,19 @@ function runFrequencyAndHydrology() {
     rowRat.push(qRat);
 
     const p24_T = freq24.results[selectedCode].quantiles[T];
-    const uhT = computeModifiedTriangularUH(p24_T, stormPattern24, A_km2, rz.Tc_hr, C_coef);
+    const uhT = computeModifiedTriangularUH(p24_T, stormPattern24, A_km2, rz.Tc_hr, C_coef, CN_val);
+    const uhS = computeSCSUnitHydrograph(p24_T, stormPattern24, A_km2, rz.Tc_hr, C_coef, CN_val);
     rowTri.push(uhT.Qp);
+    rowScs.push(uhS.Qp);
 
-    if (T === targetT) { targetUhRes = uhT; targetRatQp = qRat; }
+    if (T === targetT) { triRes = uhT; scsRes = uhS; targetRatQp = qRat; }
   });
+  const rowUH = uhMethod === "SCS" ? rowScs : rowTri;
+  const targetUhRes = uhMethod === "SCS" ? scsRes : triRes;
+  const uhMethodLabel = uhMethod === "SCS" ? "SCS 無因次單位歷線" : "修正三角型單位歷線";
 
   const isLarge = A_ha >= 1000;
-  const chosenClearSeries = isLarge ? rowTri : rowRat;
+  const chosenClearSeries = isLarge ? rowUH : rowRat;
   const chosenClearQ = isLarge ? targetUhRes.Qp : targetRatQp;
   const chosenSedQ = chosenClearQ * (1 + alphaPct);
 
@@ -2480,7 +2744,11 @@ function runFrequencyAndHydrology() {
     </tr>
     <tr style="${isLarge ? 'background:#064e3b;' : ''}">
       <td><strong>修正三角型單位歷線配合同位序 (△-同)</strong></td>
-      ${rowTri.map(q => `<td><strong>${q.toFixed(2)}</strong></td>`).join('')}
+      ${rowTri.map(q => `<td>${uhMethod === "TRI" ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}</td>`).join('')}
+    </tr>
+    <tr style="${isLarge && uhMethod === "SCS" ? 'background:#064e3b;' : ''}">
+      <td><strong>SCS 無因次單位歷線配合同位序 (S-同)${CN_val ? ` [CN=${CN_val}]` : ''}</strong></td>
+      ${rowScs.map(q => `<td>${uhMethod === "SCS" ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}</td>`).join('')}
     </tr>
     <tr style="background:#31102f; color:#fbcfe8;">
       <td><strong>一般含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+&alpha;, &alpha;=${(alphaPct*100).toFixed(0)}%)</strong></td>
@@ -2493,7 +2761,7 @@ function runFrequencyAndHydrology() {
   `;
 
   document.getElementById('hydroResultSummary').innerHTML =
-    `✅ <strong>${isLarge ? 'A ≥ 1,000 ha【修正三角型單位歷線】' : 'A < 1,000 ha【合理化公式】'}</strong>：` +
+    `✅ <strong>${isLarge ? 'A ≥ 1,000 ha【' + uhMethodLabel + '】' : 'A < 1,000 ha【合理化公式】'}</strong>：` +
     `清水流 Q<sub>${targetT}</sub> = <span style="color:#38bdf8;">${chosenClearQ.toFixed(2)} cms</span> ｜ ` +
     `含砂水流 Q<sub>s</sub> = <span style="color:#f472b6;">${chosenSedQ.toFixed(2)} cms</span>` +
     (dfMetrics.isDebris ? ` ｜ ⚠️ <strong>土石流流量 Q<sub>d</sub> = <span style="color:#facc15;">${dfMetrics.Qd.toFixed(2)} cms</span></strong>` : '');
@@ -2519,7 +2787,15 @@ function runFrequencyAndHydrology() {
     stormPattern24,
     rowIntensities,
     rowRat,
+    stationFreqs,
     rowTri,
+    rowScs,
+    rowUH,
+    triRes,
+    scsRes,
+    uhMethod,
+    uhMethodLabel,
+    CN_val,
     rowDebris,
     targetUhRes,
     chosenClearQ,
@@ -2528,6 +2804,7 @@ function runFrequencyAndHydrology() {
   };
 
   buildExportCSV(selectedCode, targetT, targetUhRes, targetRatQp, chosenSedQ, dfMetrics);
+  syncActiveControlPoint();
 }
 
 function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics) {
@@ -3043,6 +3320,8 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <div class="caption">表 5-3 同位序法各序位百分率計算表（單位：%）</div>
   <table><thead><tr><th>序位 k</th>${evs.map((e, i) => `<th>事件 ${i + 1}<br>(${e.year})</th>`).join('')}<th>平均 p̄<sub>k</sub></th><th>配置時段 (hr)</th></tr></thead><tbody>${rkRows}
   <tr style="background:#f1f5f9;font-weight:bold;"><td style="text-align:center;">合計</td>${sortedP.map(arr => `<td>${arr.reduce((a, b) => a + b, 0).toFixed(2)}</td>`).join('')}<td>${meanSum.toFixed(2)}</td><td></td></tr></tbody></table>
+  <div class="caption">圖 5-1 暴雨場次 24 小時累積雨量曲線（細線：各暴雨事件；粗黑線：設計雨型）</div>
+  <div style="text-align:center;">${cumulativeCurveSVG(evs, d.stormPattern24, 640, 330)}</div>
   <p><strong>步驟 6：設計雨量分配。</strong>各時段設計雨量 P<sub>j</sub>(T) = P<sub>24</sub>(T) × p<sub>j</sub> / 100。以 ${d.targetT} 年重現期為例，P<sub>24</sub>(${d.targetT}) = ${P24T.toFixed(1)} mm（${selDistObj.name}），最大時段 p<sub>max</sub> = ${Math.max(...d.stormPattern24).toFixed(2)}%，最大時段雨量 = ${P24T.toFixed(1)} × ${Math.max(...d.stormPattern24).toFixed(2)}% = ${(P24T * Math.max(...d.stormPattern24) / 100).toFixed(1)} mm，其餘時段如表 5 所示。</p>`;
     appendixHTML = `
   <h3>附錄　同位序法選用暴雨事件逐時雨量</h3>
@@ -3081,10 +3360,12 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <table><thead><tr><th>T (年)</th><th>log T</th><th>G + H·log T</th><th>a / (t+B)<sup>C</sup></th><th>I<sub>60</sub><sup>25</sup></th><th>I<sub>T</sub> (mm/hr)</th></tr></thead><tbody>${idfRows}</tbody></table>
   <p>合理化公式洪峰流量：Q<sub>p</sub> = C × I × A / 360（A 以 ha、I 以 mm/hr 計）。以 ${d.targetT} 年為例：Q<sub>p</sub> = ${d.C_coef} × ${d.rowIntensities[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} × ${w.A_ha.toFixed(1)} / 360 = ${d.rowRat[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} cms。</p>`;
 
-  const uh = d.targetUhRes;
+  const uh = d.triRes;
+  const scs = d.scsRes;
+  const effNote = d.CN_val ? `採手動輸入之 CN = ${d.CN_val}（S = 25400/CN − 254 = ${uh.eff.S.toFixed(1)} mm，Ia = 0.2S = ${uh.eff.Ia.toFixed(1)} mm，Pe = (P − Ia)² / (P − Ia + S)，逐時累積雨量計算）` : `採逕流係數 C = ${d.C_coef}（Re = C × P）`;
   const D_u = Math.max(0.1, +(0.135 * w.Tc_hr).toFixed(2));
   const Tr_u = +(1.67 * uh.Tp).toFixed(2);
-  const Pe_total = P24T * d.C_coef;
+  const Pe_total = uh.PeTotal;
   const volCalc = uh.Q.reduce((a, b) => a + b, 0) * 0.25 * 3600;
   const volTheo = w.A_km2 * 1e6 * Pe_total / 1000;
   const uhStepHTML = `
@@ -3093,8 +3374,13 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <p>(2) 洪峰到達時間：T<sub>p</sub> = D/2 + 0.6 t<sub>c</sub> = ${D_u.toFixed(2)}/2 + 0.6 × ${w.Tc_hr.toFixed(2)} = ${uh.Tp.toFixed(2)} hr。</p>
   <p>(3) 退水時間：T<sub>r</sub> = 1.67 T<sub>p</sub> = 1.67 × ${uh.Tp.toFixed(2)} = ${Tr_u.toFixed(2)} hr；基期 T<sub>b</sub> = T<sub>p</sub> + T<sub>r</sub> = ${uh.Tp.toFixed(2)} + ${Tr_u.toFixed(2)} = ${uh.Tb.toFixed(2)} hr（約 2.67 T<sub>p</sub>）。</p>
   <p>(4) 單位洪峰流量（單位有效降雨 R<sub>e</sub> = 10 mm）：Q<sub>p</sub> = 0.208 × A × R<sub>e</sub> / T<sub>p</sub> = 0.208 × ${w.A_km2.toFixed(2)} × 10 / ${uh.Tp.toFixed(2)} = ${uh.unitQp_10mm.toFixed(1)} cms（A 以 km² 計，0.208 為洪峰係數）。</p>
-  <p>(5) 設計洪水歷線：各小時有效降雨 R<sub>e,j</sub> = P<sub>24</sub>(T) × p<sub>j</sub>/100 × C（C = ${d.C_coef} 為逕流係數）。每小時降雨分為 10 個子脈衝，各以三角形單位歷線（尖峰 0.208 A /T<sub>p</sub> 每 mm、峰於 T<sub>p</sub>、止於 T<sub>b</sub>）依時間延遲疊加，演算時距 Δt = 0.25 hr，Q(t) = ΣΣ R<sub>e,j</sub> × u(t − τ<sub>j,m</sub>)，不再另作洪峰縮放。</p>
-  <p>(6) ${d.targetT} 年重現期驗算：P<sub>24</sub> = ${P24T.toFixed(1)} mm，有效降雨總量 = ${P24T.toFixed(1)} × ${d.C_coef} = ${Pe_total.toFixed(1)} mm；疊加所得洪峰 Q<sub>p</sub> = <strong>${uh.Qp.toFixed(2)} cms</strong>，發生於第 ${uh.peakTimeHr} 小時；歷線下總體積 ΣQ·Δt = ${volCalc.toExponential(3)} m³，理論逕流體積 A × R<sub>e</sub> = ${volTheo.toExponential(3)} m³（比值 ${(volCalc / volTheo * 100).toFixed(1)}%）。</p>`;
+  <p>(5) 設計洪水歷線：各小時有效降雨 R<sub>e,j</sub> = P<sub>24</sub>(T) × p<sub>j</sub>/100 之有效部分，${effNote}。每小時降雨分為 10 個子脈衝，各以三角形單位歷線（尖峰 0.208 A /T<sub>p</sub> 每 mm、峰於 T<sub>p</sub>、止於 T<sub>b</sub>）依時間延遲疊加，演算時距 Δt = 0.25 hr，Q(t) = ΣΣ R<sub>e,j</sub> × u(t − τ<sub>j,m</sub>)，不再另作洪峰縮放。</p>
+  <p>(6) ${d.targetT} 年重現期驗算：P<sub>24</sub> = ${P24T.toFixed(1)} mm，有效降雨總量 = ${Pe_total.toFixed(1)} mm（${d.CN_val ? 'CN 法' : P24T.toFixed(1) + ' × ' + d.C_coef}）；疊加所得洪峰 Q<sub>p</sub> = <strong>${uh.Qp.toFixed(2)} cms</strong>，發生於第 ${uh.peakTimeHr} 小時；歷線下總體積 ΣQ·Δt = ${volCalc.toExponential(3)} m³，理論逕流體積 A × R<sub>e</sub> = ${volTheo.toExponential(3)} m³（比值 ${(volCalc / volTheo * 100).toFixed(1)}%）。</p>`;
+
+  const appendixFreqHTML = d.stationFreqs ? `
+  <h3>附錄　各雨量站個別最大 24 小時暴雨頻率分析成果</h3>
+  <p>依規劃報告做法，各雨量站先各自以五種機率分布進行頻率分析（樣本：${d.stationFreqs.map(x => x.st.name + '—' + x.method).join('；')}），成果列於下表；最後再就徐昇加權後之流域樣本（表 3、表 4）綜合評估，擇一分布套用至全集水區。${stationFreqSummaryText(d.stationFreqs, d.selectedCode)}流域採用 <strong>${d.selectedCode}</strong>。</p>
+  ${stationFreqTablesHTML(d.stationFreqs, d.selectedCode, 'border="1"')}` : '';
 
   const reportHTML = `
 <!DOCTYPE html>
@@ -3205,6 +3491,12 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
   <h3>三、降雨量分析</h3>
   <p>經統計分析選用雨量站歷年降雨紀錄，計畫區徐昇加權年平均降雨量為 <strong>${d.P_annual.toFixed(1)} mm</strong>，歷年最大 24 小時暴雨量彙整如表 2 所示。年最大 24 小時暴雨量之推求方式：${d.basis ? d.basis.methodNote : ''}</p>
+  ${d.basis && d.basis.convInfo ? `<div style="margin:6px 0; font-size:13px;">
+    <strong>表 3-3　台灣地區年最大日暴雨量修正係數（一日→24 小時）</strong>
+    <table style="width:60%; margin:4px 0;"><tr><th>區域</th><th>北</th><th>中</th><th>南</th><th>東</th></tr><tr><td>修正係數</td><td>1.15</td><td>1.14</td><td>1.14</td><td>1.17</td></tr></table>
+    <div>出處：${DAYCONV_SOURCE}（係經由規劃報告引用，原報告未逐一核對）。</div>
+    <div>本次採用：<strong>${d.basis.convInfo.label}</strong>（${d.basis.convInfo.auto ? '依採用雨量站所在縣市之徐昇權重多數決自動判定' : '使用者手動指定'}；各區權重：${Object.keys(d.basis.convInfo.shares).map(r => r + '區 ' + (d.basis.convInfo.shares[r] * 100).toFixed(0) + '%').join('、') || '無'}）。${d.basis.method === 'daily' ? '本案採日資料推求，已乘上此係數。' : '本案採逐時資料連續 24 小時取最大，未使用此係數。'}縣市→區域歸類為本工具之假設（北＝基隆/臺北/新北/桃園/新竹/苗栗；中＝臺中/彰化/南投/雲林；南＝嘉義/臺南/高雄/屏東；東＝宜蘭/花蓮/臺東）。</div>
+  </div>` : ''}
 
   <div class="caption">表 2 集水區歷年最大 24 小時暴雨量一覽表（單位：mm）</div>
   <table>
@@ -3247,7 +3539,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </table>
 
   <h3>六、洪峰流量分析與單位歷線圖</h3>
-  <p>本集水區面積為 <strong>${w.A_ha.toFixed(1)} ha</strong>（${isLarge ? '大於 1,000 ha，依水土保持技術規範採用修正三角型單位歷線法' : '小於 1,000 ha，依水土保持技術規範採用合理化公式法'}）。天然河段採用芮哈（Rziha）經驗公式估算流下速度 W = 72 × (H/L)<sup>0.6</sup>，集流時間分析成果如表 6 所示；無因次降雨強度分析成果如表 7 所示；修正三角型單位歷線原理與設計洪水歷線如圖 4 及表 8 所示；各重現期距洪峰流量彙整如表 9 所示。</p>
+  <p>本集水區面積為 <strong>${w.A_ha.toFixed(1)} ha</strong>（${isLarge ? '大於 1,000 ha，依水土保持技術規範採用單位歷線法（本次：' + d.uhMethodLabel + '）' : '小於 1,000 ha，依水土保持技術規範採用合理化公式法'}）。天然河段採用芮哈（Rziha）經驗公式估算流下速度 W = 72 × (H/L)<sup>0.6</sup>，集流時間分析成果如表 6 所示；無因次降雨強度分析成果如表 7 所示；修正三角型單位歷線原理與設計洪水歷線如圖 4 及表 8 所示；各重現期距洪峰流量彙整如表 9 所示。</p>
 
   ${tcStepHTML}
   <div class="caption">表 6 集水區控制點座標與集流時間分析成果一覽表</div>
@@ -3293,12 +3585,22 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
       <tr>
         <td style="text-align:center;">X=${twd.x}, Y=${twd.y}</td>
         <td>${w.A_ha.toFixed(1)}</td>
-        <td>${d.targetUhRes.Tp.toFixed(2)}</td>
-        <td>${d.targetUhRes.Tb.toFixed(2)}</td>
-        <td>${d.targetUhRes.unitQp_10mm.toFixed(1)}</td>
+        <td>${d.triRes.Tp.toFixed(2)}</td>
+        <td>${d.triRes.Tb.toFixed(2)}</td>
+        <td>${d.triRes.unitQp_10mm.toFixed(1)}</td>
       </tr>
     </tbody>
   </table>
+
+  <p><strong>SCS 無因次單位歷線法（比較用）：</strong>依排水計畫書規定之 SCS 無因次單位歷線，T<sub>lag</sub> = 0.6 t<sub>c</sub> = 0.6 × ${w.Tc_hr.toFixed(2)} = ${scs.Tlag.toFixed(2)} hr；T<sub>p</sub> = t<sub>r</sub>/2 + T<sub>lag</sub> = ${scs.D_unit.toFixed(2)}/2 + ${scs.Tlag.toFixed(2)} = ${scs.Tp.toFixed(2)} hr（t<sub>r</sub> 取單位降雨延時 D = 0.135 t<sub>c</sub>）；Q<sub>p</sub> = 0.208 A R<sub>e</sub> / T<sub>p</sub>（R<sub>e</sub> = 10 mm 時為 ${scs.unitQp_10mm.toFixed(1)} cms）；基期 T<sub>b</sub> = 2.67 T<sub>p</sub> = ${scs.Tb.toFixed(2)} hr。以時間比 t/T<sub>p</sub> 與流量比 q/Q<sub>p</sub> 之無因次曲線（表 8-2）轉換為各時刻流量，逐時有效降雨以 10 個子脈衝依時間延遲疊加；曲線下面積為 ${scs.areaRatio.toFixed(3)} T<sub>p</sub>Q<sub>p</sub>（三角形為 1.335）。有效降雨：${effNote}。<span style="color:#b45309;">本表比值係採 USDA NRCS National Engineering Handbook Part 630 之標準座標，水利署排水計畫書附表五原文未能取得核對，正式送審前請與附表五比對。</span></p>
+  <div class="caption">表 8-2 SCS 無因次單位歷線座標（t/T<sub>p</sub>、q/Q<sub>p</sub>）</div>
+  <table><thead><tr>${[0,1,2].map(() => '<th>t/T<sub>p</sub></th><th>q/Q<sub>p</sub></th>').join('')}</tr></thead><tbody>${(() => { const R = SCS_UH_RATIOS, n = Math.ceil(R.length / 3); let o = ''; for (let i = 0; i < n; i++) o += '<tr>' + [0,1,2].map(k => R[i + k * n] ? `<td>${R[i + k * n][0].toFixed(1)}</td><td>${R[i + k * n][1].toFixed(3)}</td>` : '<td></td><td></td>').join('') + '</tr>'; return o; })()}</tbody></table>
+  <div class="caption">表 8-3 修正三角型與 SCS 無因次單位歷線洪峰流量比較（單位：cms；有效雨量：${d.CN_val ? 'CN = ' + d.CN_val : 'C = ' + d.C_coef}）</div>
+  <table><thead><tr><th>方法</th><th>2年</th><th>5年</th><th>10年</th><th>25年</th><th>50年</th><th>100年</th><th>200年</th></tr></thead><tbody>
+    <tr><td style="text-align:center;">修正三角型 (△-同)</td>${d.rowTri.map(q => `<td>${q.toFixed(2)}</td>`).join('')}</tr>
+    <tr><td style="text-align:center;">SCS 無因次 (S-同)</td>${d.rowScs.map(q => `<td>${q.toFixed(2)}</td>`).join('')}</tr>
+    <tr><td style="text-align:center;">SCS／三角型</td>${d.rowScs.map((q, i) => `<td>${(q / d.rowTri[i]).toFixed(3)}</td>`).join('')}</tr></tbody></table>
+  <p>本次報告採用之單位歷線法：<strong>${d.uhMethodLabel}</strong>${isLarge ? '（A ≥ 1,000 ha，作為設計洪峰）' : '（A &lt; 1,000 ha 依規定採合理化公式，歷線法僅供比較）'}。</p>
 
   ${hydroImgUrl ? `
   <div class="fig-box">
@@ -3313,15 +3615,19 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     </thead>
     <tbody>
       <tr>
-        <td rowspan="2" style="text-align:center;">X=${twd.x}<br>Y=${twd.y}</td>
-        <td rowspan="2">${w.A_ha.toFixed(1)}</td>
-        <td rowspan="2">${w.Tc_hr.toFixed(2)}</td>
+        <td rowspan="3" style="text-align:center;">X=${twd.x}<br>Y=${twd.y}</td>
+        <td rowspan="3">${w.A_ha.toFixed(1)}</td>
+        <td rowspan="3">${w.Tc_hr.toFixed(2)}</td>
         <td style="text-align:center;">合-無</td>
         ${d.rowRat.map(q => `<td>${!isLarge ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}<br>(${(q/w.A_km2).toFixed(2)})</td>`).join('')}
       </tr>
       <tr>
         <td style="text-align:center;">△-同</td>
-        ${d.rowTri.map(q => `<td>${isLarge ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}<br>(${(q/w.A_km2).toFixed(2)})</td>`).join('')}
+        ${d.rowTri.map(q => `<td>${isLarge && d.uhMethod === 'TRI' ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}<br>(${(q/w.A_km2).toFixed(2)})</td>`).join('')}
+      </tr>
+      <tr>
+        <td style="text-align:center;">S-同</td>
+        ${d.rowScs.map(q => `<td>${isLarge && d.uhMethod === 'SCS' ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}<br>(${(q/w.A_km2).toFixed(2)})</td>`).join('')}
       </tr>
     </tbody>
   </table>
@@ -3338,11 +3644,11 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     <tbody>
       <tr>
         <td style="text-align:center;">清水流洪峰 Q<sub>p</sub></td>
-        ${(isLarge ? d.rowTri : d.rowRat).map(q => `<td>${q.toFixed(2)}</td>`).join('')}
+        ${(isLarge ? d.rowUH : d.rowRat).map(q => `<td>${q.toFixed(2)}</td>`).join('')}
       </tr>
       <tr>
         <td style="text-align:center;">含砂水流 Q<sub>s</sub> (&alpha;=${(d.alphaPct * 100).toFixed(0)}%)</td>
-        ${(isLarge ? d.rowTri : d.rowRat).map(q => `<td>${(q * (1 + d.alphaPct)).toFixed(2)}</td>`).join('')}
+        ${(isLarge ? d.rowUH : d.rowRat).map(q => `<td>${(q * (1 + d.alphaPct)).toFixed(2)}</td>`).join('')}
       </tr>
       <tr style="${df.isDebris ? 'background:#fef2f2;font-weight:bold;' : ''}">
         <td style="text-align:center;">土石流流量 Q<sub>d</sub> (C<sub>d</sub>=${df.Cd.toFixed(3)})</td>
@@ -3359,7 +3665,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     <tbody>
       <tr>
         <td style="text-align:center;">TWD97 (${twd.x}, ${twd.y})${df.isDebris ? `<br>${df.dfId}` : ''}</td>
-        <td style="text-align:center;">${isLarge ? '修正三角型單位歷線法' : '合理化公式法'}</td>
+        <td style="text-align:center;">${isLarge ? d.uhMethodLabel + '法' : '合理化公式法'}</td>
         <td>${d.chosenClearQ.toFixed(2)}</td>
         <td>${d.chosenSedQ.toFixed(2)}</td>
         <td>${df.Qd.toFixed(2)}</td>
@@ -3368,6 +3674,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     </tbody>
   </table>
   ${appendixHTML}
+  ${appendixFreqHTML}
 </body>
 </html>
   `;
@@ -3383,6 +3690,11 @@ function buildExportCSV(distCode, T, uhResult, qRat, qSed, dfMetrics) {
   csv += `控制點TWD97_X,${twd.x},控制點TWD97_Y,${twd.y},控制點緯度,${twd.lat},控制點經度,${twd.lon}\n`;
   csv += `集水面積 A (ha),${currentWatershedParams.A_ha.toFixed(2)},流路長 L (m),${currentWatershedParams.L_m.toFixed(1)},高程差 H (m),${currentWatershedParams.H_m.toFixed(1)},集流時間 Tc (hr),${currentWatershedParams.Tc_hr.toFixed(2)}\n`;
   csv += `選用分布,${distCode},重現期(年),${T},合理化洪峰(cms),${qRat.toFixed(2)},修正三角形歷線洪峰(cms),${uhResult.Qp.toFixed(2)},含砂水流洪峰(cms),${qSed.toFixed(2)},Cd公式原始值,${dfMetrics.CdRaw === null ? '不適用(θ≥φ)' : dfMetrics.CdRaw.toFixed(3)},土石流體積濃度Cd(採用),${dfMetrics.Cd.toFixed(3)},土石流尖峰流量Qd(cms),${dfMetrics.Qd.toFixed(2)}\n\n`;
+  if (lastReportData) {
+    const d0 = lastReportData, ci = d0.basis && d0.basis.convInfo;
+    csv += `採用單位歷線法,${d0.uhMethodLabel},有效雨量方式,${d0.CN_val ? 'CN=' + d0.CN_val : 'C=' + d0.C_coef},三角型洪峰(cms),${d0.triRes.Qp.toFixed(2)},SCS洪峰(cms),${d0.scsRes.Qp.toFixed(2)}\n`;
+    if (ci) csv += `一日→24hr換算係數,${ci.label}${ci.auto ? '(自動判定)' : '(手動)'},來源,水利署96年水文業務現代化綜合計畫表3-3\n`;
+  }
   csv += "時間(hr),有效雨量Re(mm),清水流流量Q(cms),土石流流量Qd(cms)\n";
   uhResult.timeAxis.forEach((t, i) => {
     const qClear = uhResult.Q[i];
@@ -3404,6 +3716,8 @@ document.getElementById('btnExportCSV').addEventListener('click', () => {
 document.getElementById('btnRunHydrology').addEventListener('click', runFrequencyAndHydrology);
 document.getElementById('returnPeriodSelect').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('distSelect').addEventListener('change', runFrequencyAndHydrology);
+document.getElementById('select_uhMethod').addEventListener('change', runFrequencyAndHydrology);
+document.getElementById('input_CN').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('chkDebrisStream').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_theta').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_phi').addEventListener('change', runFrequencyAndHydrology);
@@ -3419,6 +3733,215 @@ document.getElementById('geojsonFile').addEventListener('change', async (e) => {
     applyWatershedGeometry({ feature: feat });
   } catch (err) { setStatus(`GeoJSON 讀取失敗：${err.message}`, "error"); }
 });
+
+
+// ============================================================================
+// 8. 多控制點模式：各點獨立集水區／徐昇／頻率分析／洪峰（不做匯流）
+// ============================================================================
+const CP_COLORS = ["#16a34a", "#2563eb", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#a16207", "#db2777", "#4d7c0f", "#475569"];
+
+function registerControlPoint(geo) {
+  cpSeq++;
+  const pt = { id: "cp" + cpSeq, name: `控制點${cpSeq}`, type: controlPoints.length === 0 ? "主流" : "支流", geo, uncheckedIds: [], d: null, color: CP_COLORS[(cpSeq - 1) % CP_COLORS.length] };
+  controlPoints.push(pt);
+  activePointId = pt.id;
+  renderControlPointList();
+}
+
+// 每次演算完成後，將結果存回目前作用中的控制點
+function syncActiveControlPoint() {
+  if (!activePointId || restoringPoint === "skip") return;
+  const pt = controlPoints.find(x => x.id === activePointId);
+  if (!pt) return;
+  pt.d = lastReportData;
+  pt.uncheckedIds = currentThiessenList.filter(x => !x.checked).map(x => x.id);
+  renderControlPointList();
+}
+
+function drawControlPointsLayer() {
+  layerControlPoints.clearLayers();
+  controlPoints.forEach(pt => {
+    if (!pt.geo || !pt.geo.feature) return;
+    L.geoJSON(pt.geo.feature, { style: { color: pt.color, weight: pt.id === activePointId ? 3.5 : 2, fillColor: pt.color, fillOpacity: pt.id === activePointId ? 0.12 : 0.05, dashArray: pt.id === activePointId ? null : "5,4", interactive: false } }).addTo(layerControlPoints);
+    const ll = pt.geo.outletLatLon;
+    if (ll) L.circleMarker(ll, { radius: 6, fillColor: pt.color, color: "#fff", weight: 2, fillOpacity: 1, interactive: false })
+      .bindTooltip(`${pt.name}（${pt.type}）`, { permanent: true, direction: "right", offset: [8, 0] }).addTo(layerControlPoints);
+  });
+}
+
+function renderControlPointList() {
+  const el = document.getElementById('cpList');
+  const badge = document.getElementById('cpCountBadge');
+  if (!el) return;
+  if (badge) badge.textContent = `${controlPoints.length} 點`;
+  drawControlPointsLayer();
+  if (controlPoints.length === 0) { el.innerHTML = '<div style="color:#94a3b8;">尚無控制點。勾選「啟用多控制點模式」後，於地圖河道上點選。</div>'; return; }
+  const rows = controlPoints.map((pt, i) => {
+    const d = pt.d, act = pt.id === activePointId;
+    let q = '<span style="color:#fbbf24;">待雨量資料</span>';
+    if (d) q = `${d.watershed.A_ha.toFixed(0)} ha｜Q<sub>${d.targetT}</sub>=<strong>${d.chosenClearQ.toFixed(1)}</strong> cms`;
+    return `<tr style="${act ? 'background:#1e3a8a;' : ''}">
+      <td style="color:${pt.color};">●</td>
+      <td><input type="text" class="cp-name" data-id="${pt.id}" value="${pt.name.replace(/"/g, '&quot;')}" style="width:92px;margin:0;padding:2px 4px;font-size:11.5px;"/></td>
+      <td><select class="cp-type" data-id="${pt.id}" style="margin:0;padding:2px;font-size:11.5px;"><option ${pt.type === '主流' ? 'selected' : ''}>主流</option><option ${pt.type === '支流' ? 'selected' : ''}>支流</option></select></td>
+      <td>${q}</td>
+      <td style="white-space:nowrap;"><button class="cp-view secondary" data-id="${pt.id}" style="width:auto;padding:1px 6px;margin:0;font-size:11px;">檢視</button> <button class="cp-del secondary" data-id="${pt.id}" style="width:auto;padding:1px 6px;margin:0;font-size:11px;">刪</button></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table style="width:100%;"><tbody>${rows}</tbody></table>`;
+}
+
+function restoreControlPoint(id) {
+  const pt = controlPoints.find(x => x.id === id);
+  if (!pt) return;
+  activePointId = id;
+  restoringPoint = true;
+  try {
+    applyWatershedGeometry({ ...pt.geo, snapDistM: 0 });
+    const unchecked = new Set(pt.uncheckedIds || []);
+    if (unchecked.size) {
+      currentThiessenList.forEach(x => { if (unchecked.has(x.id)) x.checked = false; });
+      if (currentThiessenList.some(x => x.checked)) {
+        recomputeActiveVoronoi(); refreshThiessenUI(); runFrequencyAndHydrology();
+      }
+    }
+  } finally { restoringPoint = false; }
+  pt.d = lastReportData;
+  renderControlPointList();
+}
+
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (!t || !t.classList) return;
+  if (t.classList.contains('cp-name')) { const pt = controlPoints.find(x => x.id === t.dataset.id); if (pt) { pt.name = t.value.trim() || pt.name; drawControlPointsLayer(); } }
+  else if (t.classList.contains('cp-type')) { const pt = controlPoints.find(x => x.id === t.dataset.id); if (pt) pt.type = t.value; drawControlPointsLayer(); }
+});
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (!t || !t.classList) return;
+  if (t.classList.contains('cp-view')) restoreControlPoint(t.dataset.id);
+  else if (t.classList.contains('cp-del')) {
+    controlPoints = controlPoints.filter(x => x.id !== t.dataset.id);
+    if (activePointId === t.dataset.id) activePointId = null;
+    renderControlPointList();
+  }
+});
+document.getElementById('btnCpClear').addEventListener('click', () => {
+  if (controlPoints.length && !confirm("確定清除全部控制點？")) return;
+  controlPoints = []; activePointId = null; cpSeq = 0; renderControlPointList();
+});
+document.getElementById('btnCpRecalc').addEventListener('click', () => {
+  if (!controlPoints.length) return;
+  const keep = activePointId;
+  setStatus("正在重算全部控制點...");
+  controlPoints.forEach(pt => restoreControlPoint(pt.id));
+  if (keep && controlPoints.some(x => x.id === keep)) restoreControlPoint(keep);
+  setStatus(`✅ 已重算 ${controlPoints.length} 個控制點。`);
+});
+document.getElementById('chkMultiMode').addEventListener('change', e => {
+  if (e.target.checked) setStatus("已啟用多控制點模式：請在地圖河道上依序點選主流／支流控制點，每點會各自計算洪峰。");
+});
+
+function cpRows() { return controlPoints.filter(pt => pt.d); }
+function buildMultiPointCSV() {
+  const pts = cpRows();
+  let csv = "﻿多控制點洪峰彙整表（各點獨立計算，未做匯流疊加）\n";
+  csv += "編號,名稱,類型,TWD97_X,TWD97_Y,A(ha),L(m),H(m),Tc(hr),方法,採用分布," + RETURN_PERIODS.map(T => `P24_${T}yr(mm)`).join(",") + "," + RETURN_PERIODS.map(T => `Q${T}_清水(cms)`).join(",") + "," + RETURN_PERIODS.map(T => `Qs${T}_含砂(cms)`).join(",") + "\n";
+  pts.forEach((pt, i) => {
+    const d = pt.d, w = d.watershed, isL = w.A_ha >= 1000;
+    const ser = isL ? d.rowUH : d.rowRat;
+    csv += [i + 1, pt.name, pt.type, w.outletTWD97.x, w.outletTWD97.y, w.A_ha.toFixed(1), w.L_m.toFixed(1), w.H_m.toFixed(1), w.Tc_hr.toFixed(2),
+      isL ? d.uhMethodLabel : "合理化公式", d.selectedCode,
+      ...RETURN_PERIODS.map(T => d.freq24.results[d.selectedCode].quantiles[T].toFixed(1)),
+      ...ser.map(q => q.toFixed(2)), ...ser.map(q => (q * (1 + d.alphaPct)).toFixed(2))].join(",") + "\n";
+  });
+  return csv;
+}
+document.getElementById('btnCpCsv').addEventListener('click', () => {
+  if (!cpRows().length) { setStatus("尚無已完成演算之控制點。", "warn"); return; }
+  const blob = new Blob([buildMultiPointCSV()], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `多控制點洪峰彙整_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+});
+
+function multiPointReportHTML(pts, mapImgs) {
+  const f1 = v => v.toFixed(1), f2 = v => v.toFixed(2);
+  const d0 = pts[0].d;
+  const ci = d0.basis && d0.basis.convInfo;
+  const T = RETURN_PERIODS;
+  const th = `<th>${T.join('年</th><th>')}年</th>`;
+  const sumRows = pts.map((pt, i) => {
+    const w = pt.d.watershed, isL = w.A_ha >= 1000, ser = isL ? pt.d.rowUH : pt.d.rowRat;
+    return `<tr><td style="text-align:center;">${i + 1}</td><td style="text-align:center;">${pt.name}</td><td style="text-align:center;">${pt.type}</td><td>${w.outletTWD97.x}<br>${w.outletTWD97.y}</td><td>${f1(w.A_ha)}</td><td>${f1(w.L_m)}</td><td>${f1(w.H_m)}</td><td>${f2(w.Tc_hr)}</td><td style="text-align:center;">${isL ? pt.d.uhMethodLabel : '合理化公式'}</td>${ser.map(q => `<td>${f2(q)}</td>`).join('')}</tr>`;
+  }).join('');
+  const rainRows = pts.map((pt, i) => {
+    const r = pt.d.freq24.results[pt.d.selectedCode];
+    return `<tr><td style="text-align:center;">${pt.name}</td><td style="text-align:center;">${pt.d.sample24.length}</td><td style="text-align:center;">${r.name}</td>${T.map(t => `<td>${f1(r.quantiles[t])}</td>`).join('')}</tr>`;
+  }).join('');
+  const sedRows = pts.map(pt => {
+    const w = pt.d.watershed, ser = w.A_ha >= 1000 ? pt.d.rowUH : pt.d.rowRat;
+    return `<tr><td style="text-align:center;">${pt.name}</td><td>Q<sub>s</sub> (α=${(pt.d.alphaPct * 100).toFixed(0)}%)</td>${ser.map(q => `<td>${f2(q * (1 + pt.d.alphaPct))}</td>`).join('')}</tr>` +
+      (pt.d.dfMetrics && pt.d.dfMetrics.isDebris ? `<tr style="background:#fef2f2;"><td style="text-align:center;">${pt.name}</td><td>Q<sub>d</sub> (C<sub>d</sub>=${pt.d.dfMetrics.Cd.toFixed(3)})</td>${pt.d.rowDebris.map(q => `<td>${f2(q)}</td>`).join('')}</tr>` : '');
+  }).join('');
+  const detail = pts.map((pt, i) => {
+    const d = pt.d, w = d.watershed, tw = w.outletTWD97, isL = w.A_ha >= 1000;
+    const stRows = d.thiessen.filter(x => x.checked).map(x => `<tr><td style="text-align:center;">${x.id}</td><td style="text-align:center;">${x.name}${x.withdrawn ? '(撤銷站)' : ''}</td><td>${f1(x.areaHa)}</td><td>${(x.weight * 100).toFixed(1)}%</td></tr>`).join('');
+    const fr = Object.values(d.freq24.results).map(r => `<tr style="${r.code === d.selectedCode ? 'font-weight:bold;background:#fef9c3;' : ''}"><td style="text-align:left;">${r.code === d.selectedCode ? '★ ' : ''}${r.name}</td><td>${r.chiSq.toFixed(2)}</td><td>${r.pass ? '通過' : '未通過'}</td><td>${r.rankW + r.rankH}</td>${T.map(t => `<td>${f1(r.quantiles[t])}</td>`).join('')}</tr>`).join('');
+    return `
+  <h3>${i + 4}、${pt.name}（${pt.type}）</h3>
+  <p>控制點 TWD97 (${tw.x}, ${tw.y})（${tw.lat}°N, ${tw.lon}°E），集水面積 ${f1(w.A_ha)} ha（${f2(w.A_km2)} km²），流路長 L = ${f1(w.L_m)} m，高程差 H = ${f1(w.H_m)} m，集流時間 t<sub>c</sub> = ${f2(w.Tc_hr)} hr（Rziha 公式），年平均雨量 ${f1(d.P_annual)} mm，年最大 24 小時樣本 ${d.sample24.length} 年。${d.basis ? '樣本推求：' + d.basis.methodNote : ''}</p>
+  ${mapImgs[i] ? `<div style="text-align:center;"><img src="${mapImgs[i]}" style="max-width:100%;border:1px solid #cbd5e1;" /><div class="caption">圖 ${i + 1} ${pt.name} 集水區與徐昇控制區位置圖</div></div>` : ''}
+  <div class="caption">表 ${i + 4}-1 ${pt.name} 採用雨量站與徐昇權重</div>
+  <table><thead><tr><th>站號</th><th>站名</th><th>徐昇面積 (ha)</th><th>權重</th></tr></thead><tbody>${stRows}</tbody></table>
+  <div class="caption">表 ${i + 4}-2 ${pt.name} 24 小時暴雨頻率分析成果（單位：mm；★為本點採用分布）</div>
+  <table><thead><tr><th>機率分布</th><th>卡方值</th><th>檢定</th><th>SE序位和</th>${th}</tr></thead><tbody>${fr}</tbody></table>
+  <div class="caption">表 ${i + 4}-3 ${pt.name} 各方法洪峰流量（單位：cms）</div>
+  <table><thead><tr><th>方法</th>${th}</tr></thead><tbody>
+    <tr style="${!isL ? 'font-weight:bold;' : ''}"><td style="text-align:center;">合理化公式 (合-無)</td>${d.rowRat.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
+    <tr style="${isL && d.uhMethod === 'TRI' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">修正三角型單位歷線 (△-同)</td>${d.rowTri.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
+    <tr style="${isL && d.uhMethod === 'SCS' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">SCS 無因次單位歷線 (S-同)</td>${d.rowScs.map(q => `<td>${f2(q)}</td>`).join('')}</tr></tbody></table>
+  <p>本點 A ${isL ? '≥' : '<'} 1,000 ha，設計洪峰採用<strong>${isL ? d.uhMethodLabel : '合理化公式'}</strong>：Q<sub>${d.targetT}</sub> = <strong>${f2(d.chosenClearQ)} cms</strong>。</p>`;
+  }).join('');
+  return `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>多控制點洪峰流量彙整報告</title>
+<style>
+body{font-family:"DFKai-SB","BiauKai","PMingLiU","Microsoft JhengHei",serif;color:#111;max-width:980px;margin:20px auto;padding:20px 40px;line-height:1.75}
+h1{text-align:center;font-size:22px;border-bottom:2px solid #000;padding-bottom:8px} h3{font-size:16px;margin-top:22px}
+p{text-indent:2em;margin:8px 0;text-align:justify} table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:12.5px}
+th,td{border:1px solid #000;padding:4px 6px;text-align:right} th{background:#f1f5f9;text-align:center} .caption{text-align:center;font-weight:bold;margin:14px 0 4px;font-size:14px}
+.toolbar{position:sticky;top:0;background:#1e293b;color:#fff;padding:10px 16px;border-radius:6px;display:flex;justify-content:space-between;margin-bottom:20px;font-family:sans-serif}
+.toolbar button{background:#0284c7;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:bold}
+@media print{.toolbar{display:none}body{margin:0;padding:10px}}
+</style></head><body>
+<div class="toolbar"><span>📄 <strong>多控制點洪峰流量彙整報告</strong>（${pts.length} 點）</span><button onclick="window.print()">🖨️ 列印 / 另存 PDF</button></div>
+<h1>多控制點洪峰流量彙整報告</h1>
+<h3>一、分析範圍與方法</h3>
+<p>本報告於主流及支流上手動選定 ${pts.length} 個控制點，各控制點依 DEM 自動回溯劃設集水區，並各自以選用雨量站之徐昇面積權重、CODiS 雨量資料進行最大 24 小時暴雨頻率分析（LN2、LN3、PT3、LP3、EV1 五種分布，卡方檢定與標準誤差擇優），推求設計雨量與洪峰流量。集水面積小於 1,000 ha 者採合理化公式配合無因次降雨強度，大於或等於 1,000 ha 者採${d0.uhMethodLabel}配合同位序雨型。</p>
+<p><strong>注意：各控制點之洪峰流量均為各點集水區獨立計算之結果，未進行歷線匯流演算（支流匯入主流處之歷線疊加、洪峰衰減與時間差未予考慮），故各點洪峰不可直接相加或相減。</strong>如需支流匯入後之主流設計流量，須另以歷線演算。</p>
+<h3>二、共同計算參數</h3>
+<p>逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量 = C × 降雨'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。</p>
+<h3>三、控制點洪峰流量彙整</h3>
+<div class="caption">表 1 各控制點基本資料及設計洪峰流量彙整表（單位：cms，採用方法之清水流洪峰）</div>
+<table><thead><tr><th>編號</th><th>控制點</th><th>類型</th><th>TWD97<br>X / Y</th><th>A (ha)</th><th>L (m)</th><th>H (m)</th><th>t<sub>c</sub> (hr)</th><th>採用方法</th>${th}</tr></thead><tbody>${sumRows}</tbody></table>
+<div class="caption">表 2 各控制點設計 24 小時暴雨量（單位：mm）</div>
+<table><thead><tr><th>控制點</th><th>樣本年數</th><th>採用分布</th>${th}</tr></thead><tbody>${rainRows}</tbody></table>
+<div class="caption">表 3 各控制點含砂水流${pts.some(p => p.d.dfMetrics && p.d.dfMetrics.isDebris) ? '及土石流' : ''}尖峰流量（單位：cms）</div>
+<table><thead><tr><th>控制點</th><th>類別</th>${th}</tr></thead><tbody>${sedRows}</tbody></table>
+${detail}
+</body></html>`;
+}
+
+document.getElementById('btnCpReport').addEventListener('click', async () => {
+  const pts = cpRows();
+  if (!pts.length) { setStatus("尚無已完成演算之控制點。請啟用多控制點模式並於地圖點選。", "warn"); return; }
+  setStatus(`正在合成 ${pts.length} 個控制點之地形圖與報告...`);
+  const imgs = [];
+  for (const pt of pts) { try { imgs.push(await renderWatershedMapImageForReport(pt.d)); } catch (e) { imgs.push(""); } }
+  const html = multiPointReportHTML(pts, imgs);
+  const win = window.open("", "_blank");
+  win.document.write(html); win.document.close();
+  setStatus(`✅ 多控制點洪峰彙整報告已開啟於新分頁（${pts.length} 點）。`);
+});
+renderControlPointList();
 
 const drawCtrl = new L.Control.Draw({ draw: { polygon: true, polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false } });
 map.addControl(drawCtrl);
