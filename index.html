@@ -152,7 +152,7 @@
       <div>
         <label>採用機率分布</label>
         <select id="distSelect">
-          <option value="AUTO" selected>自動選取最佳分布 (檢定通過優先 / χ²最小擇優)</option>
+          <option value="AUTO" selected>自動選取最佳分布 (卡方檢定通過後，以 SE 序位最小者)</option>
           <option value="LP3">對數皮爾遜三型 (LP3)</option>
           <option value="LN2">二參數對數常態 (LN2)</option>
           <option value="LN3">三參數對數常態 (LN3)</option>
@@ -165,6 +165,17 @@
         <input type="number" id="input_MeanAnnualP" value="3954.4" step="10" />
       </div>
     </div>
+    <div style="margin-top:6px;">
+      <label>一日→24hr 換算係數（僅用於只有日資料之站；有時資料者直接取連續 24hr）</label>
+      <select id="select_dayConv">
+        <option value="1.15" selected>北區 1.15</option>
+        <option value="1.14">中區 1.14</option>
+        <option value="1.14">南區 1.14</option>
+        <option value="1.17">東區 1.17</option>
+        <option value="1.00">不換算 1.00</option>
+      </select>
+    </div>
+    <div id="rainBasisPanel" style="font-size:11.5px; margin-top:6px; line-height:1.5;">雨量樣本與雨型說明：上傳雨量 Excel 並完成控制點後顯示</div>
     <div id="idfFormulaBox" style="font-size:11.5px; color:#38bdf8; margin-top:2px;">無因次降雨強度公式：點選控制點後自動計算</div>
   </div>
 
@@ -757,10 +768,15 @@ const DEBRIS_FLOW_STREAMS = [
 
 const RETURN_PERIODS = [2, 5, 10, 25, 50, 100, 200];
 
+// 內建預設雨型：尖峰置於第 12 小時、序位 2 置於第 13 小時（與規劃報告同位序排法一致）
 const DEFAULT_SAME_RANK_PCT_24HR = [
   1.33, 1.58, 2.27, 2.95, 3.28, 3.68, 4.02, 4.34, 4.55, 5.16, 5.93, 8.71,
   10.28, 6.88, 5.41, 4.92, 4.51, 4.17, 3.83, 3.36, 3.03, 2.49, 1.89, 1.43
-];
+].reverse();
+
+// 同位序排法：序位 1 置第 12 小時，序位 2 置第 13、序位 3 置第 11、序位 4 置第 14……序位 24 置第 24、序位 23 置第 1
+const RANK_HOUR = (() => { const a = [0]; for (let k = 1; k <= 24; k++) a.push(k % 2 === 1 ? 12 - (k - 1) / 2 : 12 + k / 2); return a; })();   // RANK_HOUR[k] = 時段(1~24)
+const RANK_AT_HOUR = (() => { const a = new Array(24); for (let k = 1; k <= 24; k++) a[RANK_HOUR[k] - 1] = k; return a; })();       // RANK_AT_HOUR[h-1] = 序位
 
 const stationRainDB = {
   "C1F941": {
@@ -1532,6 +1548,7 @@ function clearHydrologyOutputs(msg) {
   document.getElementById('peakSummaryBody').innerHTML = `<tr><td colspan="8" style="text-align:center;">${note}</td></tr>`;
   document.getElementById('hydroResultSummary').innerHTML = "🌊 洪水與土石流歷線圖（上方有效雨量柱與下方流量歷線分離不重疊）";
   document.getElementById('idfFormulaBox').textContent = "無因次降雨強度公式：待雨量資料齊備後自動計算";
+  const rbp = document.getElementById('rainBasisPanel'); if (rbp) rbp.innerHTML = "雨量樣本與雨型說明：上傳雨量 Excel 並完成控制點後顯示";
   const bd = document.getElementById('bestDistBadge');
   bd.textContent = "待分析"; bd.className = "badge warn";
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
@@ -1725,20 +1742,36 @@ function cleanCodisValue(v) {
   return num;
 }
 
-function computeSameRankPatternFromHourlyEvents(topStormEvents24hr) {
-  if (!topStormEvents24hr || topStormEvents24hr.length === 0) return [...DEFAULT_SAME_RANK_PCT_24HR];
-  const rankSums = new Array(24).fill(0);
-  topStormEvents24hr.forEach(ev => {
-    const sum = ev.reduce((a, b) => a + b, 0);
-    const pcts = ev.map(x => (x / sum) * 100).sort((a, b) => b - a);
-    for (let r = 0; r < 24; r++) rankSums[r] += pcts[r];
+// 同位序法：各事件逐時雨量 → 百分率 → 由大到小排序 → 同序位平均 → 依 RANK_HOUR 排列 → 正規化 100%
+function computeSameRankPatternFromHourlyEvents(events24hr) {
+  if (!events24hr || events24hr.length === 0) return { pattern: [...DEFAULT_SAME_RANK_PCT_24HR], sortedPct: [], meanRank: [] };
+  const sortedPct = events24hr.map(ev => {
+    const sum = ev.reduce((a, b) => a + b, 0) || 1;
+    return ev.map(x => (x / sum) * 100).sort((a, b) => b - a);
   });
-  const avgRankPct = rankSums.map(s => s / topStormEvents24hr.length);
-  const rankOrder = [24, 22, 20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23];
-  const pattern = rankOrder.map(rk => +avgRankPct[rk - 1].toFixed(2));
-  const total = pattern.reduce((a, b) => a + b, 0);
-  return pattern.map(p => +(p * 100 / total).toFixed(2));
+  const meanRank = Array.from({ length: 24 }, (_, k) => sortedPct.reduce((a, arr) => a + arr[k], 0) / sortedPct.length);
+  const raw = Array.from({ length: 24 }, (_, h) => meanRank[RANK_AT_HOUR[h] - 1]);
+  const total = raw.reduce((a, b) => a + b, 0);
+  return { pattern: raw.map(p => +(p * 100 / total).toFixed(2)), sortedPct, meanRank };
 }
+
+// ---- 觀測時間解析 / 逐時、逐日序列工具 ----
+function parseObsTime(v) {
+  if (v instanceof Date) return { y: v.getFullYear(), m: v.getMonth() + 1, d: v.getDate(), H: v.getHours() };
+  if (typeof v === "number" && window.XLSX && XLSX.SSF && XLSX.SSF.parse_date_code) {
+    const o = XLSX.SSF.parse_date_code(v);
+    if (o) return { y: o.y, m: o.m, d: o.d, H: o.H || 0 };
+  }
+  const m = String(v == null ? "" : v).match(/(\d{4})\s*[-\/年]\s*(\d{1,2})\s*[-\/月]\s*(\d{1,2})(?:\D+(\d{1,2}))?/);
+  return m ? { y: +m[1], m: +m[2], d: +m[3], H: m[4] != null ? +m[4] : 0 } : null;
+}
+const obsEpochHour = t => Math.round(Date.UTC(t.y, t.m - 1, t.d, t.H) / 3600000);
+const obsDateKey = t => `${t.y}-${String(t.m).padStart(2, "0")}-${String(t.d).padStart(2, "0")}`;
+function hourLabelFromEpoch(h) {
+  const dt = new Date(h * 3600000), pad = n => String(n).padStart(2, "0");
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())} ${pad(dt.getUTCHours())}:00`;
+}
+let rainDataVersion = 0;   // 每次上傳雨量檔遞增，用於快取流域序列
 
 function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fileName = "") {
   let stMeta = { id: forcedStId || "", name: forcedStName || "", lon: null, lat: null, elev: 0, county: "" };
@@ -1790,12 +1823,14 @@ function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fil
     const colDayP = header.findIndex(h => h.includes("降水量(mm)_累積"));
 
     const yearlySum = {}, yearlyMax24 = {}, yearlyCount = {};
+    const dailyMap = existing.dailyByDate || {};
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i]; if (!r || r.length <= colDayP) continue;
       const dRaw = r[colDate];
       const yr = dRaw instanceof Date ? dRaw.getFullYear() : (String(dRaw || "").match(/(19\d{2}|20\d{2})/) ? parseInt(RegExp.$1) : null);
       if (!yr) continue;
       const p = cleanCodisValue(r[colDayP]);
+      const tt = parseObsTime(dRaw); if (tt) dailyMap[obsDateKey(tt)] = p;
       yearlyCount[yr] = (yearlyCount[yr] || 0) + 1;
       yearlySum[yr] = (yearlySum[yr] || 0) + p;
       yearlyMax24[yr] = Math.max(yearlyMax24[yr] || 0, p);
@@ -1811,7 +1846,9 @@ function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fil
       }
     }
     if (validYrCount > 0) existing.meanAnnualP = +(sumAnnualP / validYrCount).toFixed(1);
+    existing.dailyByDate = dailyMap;
     existing.hasDaily = true;
+    existing.dailyDerived = false;
     existing.dailyLabel = `日資料(${validYrCount}年)`;
   }
 
@@ -1820,29 +1857,32 @@ function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fil
     const header = (rows[0] || []).map(h => String(h || "").trim());
     const colDate = header.indexOf("日期");
     const colPrecip = header.findIndex(h => h.includes("降水量(mm)_累積") || h.includes("降水量"));
+    const colHour = header.findIndex(h => /^(觀測)?時間/.test(h) || /^時$/.test(h) || /hour/i.test(h));
 
-    const hourlyByYear = {}, hourlyLabelByYear = {};
-    const fmtHourLabel = (v) => {
-      const pad = n => String(n).padStart(2, "0");
-      if (v instanceof Date) return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())} ${pad(v.getHours())}:00`;
-      if (typeof v === "number" && window.XLSX && XLSX.SSF && XLSX.SSF.parse_date_code) {
-        const o = XLSX.SSF.parse_date_code(v);
-        if (o) return `${o.y}-${pad(o.m)}-${pad(o.d)} ${pad(o.H)}:00`;
-      }
-      return String(v == null ? "" : v).trim();
-    };
+    const hourlyByYear = {};
+    const hMap = new Map();   // epochHour -> mm
+    let nTimed = 0;
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i]; if (!r || r.length <= colPrecip) continue;
       const dRaw = r[colDate];
       const yr = dRaw instanceof Date ? dRaw.getFullYear() : (String(dRaw || "").match(/(19\d{2}|20\d{2})/) ? parseInt(RegExp.$1) : null);
       if (!yr) continue;
-      if (!hourlyByYear[yr]) { hourlyByYear[yr] = []; hourlyLabelByYear[yr] = []; }
-      hourlyByYear[yr].push(cleanCodisValue(r[colPrecip]));
-      hourlyLabelByYear[yr].push(fmtHourLabel(dRaw));
+      if (!hourlyByYear[yr]) hourlyByYear[yr] = [];
+      const pv = cleanCodisValue(r[colPrecip]);
+      hourlyByYear[yr].push(pv);
+      const tt = parseObsTime(dRaw);
+      if (tt) {
+        if (tt.H === 0 && colHour >= 0 && r[colHour] != null && r[colHour] !== "") {   // 日期欄無時刻時，改讀「時間/時」欄
+          const hm = String(r[colHour]).match(/\d+/); if (hm) tt.H = parseInt(hm[0]);
+        }
+        hMap.set(obsEpochHour(tt), pv); nTimed++;
+      }
     }
+    // 時刻無法辨識（多筆重複時間）時，不保存逐時序列，避免誤判
+    if (nTimed > 0 && hMap.size < 0.9 * nTimed) { hMap.clear(); existing.hourlyTimeUnparsed = true; } else { existing.hourlyTimeUnparsed = false; }
 
-    const stormEvents24 = [];
     let validYrCount = 0, sumAnnualP = 0;
+    existing.hourly24ByYear = existing.hourly24ByYear || {};
     for (const [yr, arr] of Object.entries(hourlyByYear)) {
       if (arr.length < 4380) continue;
       validYrCount++;
@@ -1850,28 +1890,42 @@ function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fil
       sumAnnualP += yrTotal;
       if (!existing.hasDaily) existing.annualPByYear[yr] = +yrTotal.toFixed(1);
 
-      let winSum = 0, maxSum = 0, bestStart = 0;
+      let winSum = 0, maxSum = 0;
       for (let i = 0; i < arr.length; i++) {
         winSum += arr[i];
         if (i >= 24) winSum -= arr[i - 24];
-        if (winSum > maxSum) { maxSum = winSum; bestStart = Math.max(0, i - 23); }
+        if (winSum > maxSum) maxSum = winSum;
       }
-      if (!existing.hasDaily) existing.ams24ByYear[yr] = +maxSum.toFixed(1);
-      if (maxSum >= 80) stormEvents24.push({ maxSum, year: yr, startLabel: hourlyLabelByYear[yr][bestStart] || "", slice: arr.slice(bestStart, bestStart + 24) });
+      // 有時資料之年份一律採連續 24 小時最大雨量（優先於日最大值）
+      existing.hourly24ByYear[yr] = +maxSum.toFixed(1);
+      existing.ams24ByYear[yr] = +maxSum.toFixed(1);
     }
 
-    stormEvents24.sort((a, b) => b.maxSum - a.maxSum);
-    const top3Slices = stormEvents24.slice(0, 3).map(x => x.slice).filter(s => s.length === 24);
-    if (top3Slices.length > 0) {
-      existing.stormPattern24 = computeSameRankPatternFromHourlyEvents(top3Slices);
-      existing.stormEvents = stormEvents24.slice(0, 3).filter(x => x.slice.length === 24)
-        .map(x => ({ year: x.year, startLabel: x.startLabel, total: +x.maxSum.toFixed(1), hourly: x.slice.map(v => +(+v).toFixed(1)) }));
+    // 保存逐時序列（供流域逐時加權、暴雨場次挑選、同位序雨型）
+    if (hMap.size > 0) {
+      const ts = Array.from(hMap.keys()).sort((a, b) => a - b);
+      const tArr = new Int32Array(ts.length), vArr = new Float32Array(ts.length);
+      ts.forEach((t, i) => { tArr[i] = t; vArr[i] = hMap.get(t); });
+      existing.hourly = { t: tArr, v: vArr };
+    }
+    // 無日資料表時，由逐時資料彙整逐日雨量 (該日至少 20 筆逐時紀錄)
+    if (!existing.hasDaily && hMap.size > 0) {
+      const byDay = {};
+      for (const [t, v] of hMap) {
+        const dt = new Date((t - 1) * 3600000);   // 24:00 記入前一日
+        const k = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+        (byDay[k] = byDay[k] || { sum: 0, n: 0 }); byDay[k].sum += v; byDay[k].n++;
+      }
+      const dm = {};
+      for (const [k, o] of Object.entries(byDay)) if (o.n >= 20) dm[k] = +o.sum.toFixed(1);
+      existing.dailyByDate = dm; existing.dailyDerived = true;
     }
     if (!existing.hasDaily && validYrCount > 0) existing.meanAnnualP = +(sumAnnualP / validYrCount).toFixed(1);
     existing.hasHourly = true;
     existing.hourlyLabel = `時資料(${validYrCount}年)`;
   }
 
+  rainDataVersion++;
   if (dbKey) stationRainDB[dbKey] = existing;   // 僅以站號為鍵 (站名有大量重複，不再以站名存取)
   return { stId: dbKey, stName: stMeta.name || dbKey };
 }
@@ -2023,25 +2077,17 @@ function analyzeStandardFrequency(sampleArray) {
     results[d.code] = { ...d, n, chiSq, pass, sseWeibull, seWeibull, sseHazen, seHazen, quantiles, binDetails };
   });
 
-  // 兩階段智慧擇優選取最佳機率分布
-  let bestCode = "LP3", minScore = Infinity, anyPassed = false;
-  Object.values(results).forEach(r => {
-    if (r.pass && r.chiSq < minScore) {
-      minScore = r.chiSq;
-      bestCode = r.code;
-      anyPassed = true;
-    }
+  // 選最佳分布（對照規劃報告）：先通過卡方檢定，再以 Weibull 與 Hazen 兩法之 SE 序位總和最小者為最佳，
+  // 序位總和相同時取 Hazen SE 較小者；若五種分布皆未通過，則在五種中依同一準則擇優。
+  const rl = Object.values(results);
+  [["seWeibull", "rankW"], ["seHazen", "rankH"]].forEach(([k, rk]) => {
+    [...rl].sort((x, y) => x[k] - y[k]).forEach((r, i) => { r[rk] = i + 1; });
   });
-
-  if (!anyPassed) {
-    Object.values(results).forEach(r => {
-      const compositeScore = r.chiSq + r.seWeibull * 1e-4;
-      if (compositeScore < minScore) {
-        minScore = compositeScore;
-        bestCode = r.code;
-      }
-    });
-  }
+  const passed = rl.filter(r => r.pass);
+  const anyPassed = passed.length > 0;
+  const pool = anyPassed ? passed : rl;
+  const bestR = [...pool].sort((x, y) => (x.rankW + x.rankH) - (y.rankW + y.rankH) || x.seHazen - y.seHazen)[0];
+  const bestCode = bestR.code;
 
   return { results, bestCode, anyPassed };
 }
@@ -2120,6 +2166,190 @@ function computeModifiedTriangularUH(P24_mm, stormPct24, A_km2, Tc_hr, C_runoff)
   return { timeAxis, Pe_bar, Q, Qp: maxQ, peakTimeHr: timeAxis[peakIdx], Tp, Tb, unitQp_10mm };
 }
 
+
+// ============================================================================
+// 6.5 流域雨量樣本與雨型資料（對照規劃報告做法）
+//   A. 年最大 24hr 樣本：全部採用站皆有時資料 → 流域加權逐時雨量之連續 24 小時最大；
+//      否則皆有逐日資料 → 流域加權「同一天」日雨量之年最大值 × 一日→24hr 換算係數；
+//      否則（僅內建舊資料）→ 各站年最大值依權重加權（舊法）。
+//   C. 雨型：由有時資料之站，先依徐昇權重加成流域逐時雨量，列出各年最大 24hr 暴雨供勾選（預設前 6 場）。
+// ============================================================================
+function getDayConvFactor() {
+  const el = document.getElementById('select_dayConv');
+  const v = el ? parseFloat(el.value) : 1.15;
+  return isFinite(v) && v > 0 ? v : 1.15;
+}
+function getDayConvLabel() {
+  const el = document.getElementById('select_dayConv');
+  return el ? el.options[el.selectedIndex].text : "北區 1.15";
+}
+
+function stationHasHourly(db) { return !!(db && db.hourly && db.hourly.t && db.hourly.t.length >= 4380); }
+function stationHasDaily(db) { return !!(db && db.dailyByDate && Object.keys(db.dailyByDate).length >= 180); }
+
+// 以徐昇權重將各站逐時雨量加成流域逐時序列（逐小時對有資料之站重新正規化權重）
+function buildWeightedHourlySeries(items) {   // items: [{db, w}]
+  let tMin = Infinity, tMax = -Infinity;
+  items.forEach(({ db }) => { const t = db.hourly.t; if (t[0] < tMin) tMin = t[0]; if (t[t.length - 1] > tMax) tMax = t[t.length - 1]; });
+  const n = tMax - tMin + 1;
+  const sumx = new Float64Array(n), sumw = new Float64Array(n);
+  items.forEach(({ db, w }) => {
+    const t = db.hourly.t, v = db.hourly.v;
+    for (let i = 0; i < t.length; i++) { const k = t[i] - tMin; sumx[k] += w * v[i]; sumw[k] += w; }
+  });
+  const val = new Float64Array(n), has = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (sumw[i] > 0) { val[i] = sumx[i] / sumw[i]; has[i] = 1; }
+  return { tMin, n, val, has };
+}
+
+// 各年最大連續 24 小時視窗（視窗內至少 20 小時有資料；該年至少 4380 小時有資料）
+function annualMax24Windows(S) {
+  const { n, val, has, tMin } = S;
+  const pre = new Float64Array(n + 1), cnt = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) { pre[i + 1] = pre[i] + (has[i] ? val[i] : 0); cnt[i + 1] = cnt[i] + has[i]; }
+  const yearOf = h => new Date(h * 3600000).getUTCFullYear();
+  const best = {}, yrCnt = {};
+  let curYear = yearOf(tMin), nextStart = Date.UTC(curYear + 1, 0, 1) / 3600000;
+  for (let i = 0; i < n; i++) {
+    const h = tMin + i;
+    if (h >= nextStart) { curYear = yearOf(h); nextStart = Date.UTC(curYear + 1, 0, 1) / 3600000; }
+    if (has[i]) yrCnt[curYear] = (yrCnt[curYear] || 0) + 1;
+    if (i + 24 <= n && cnt[i + 24] - cnt[i] >= 20) {
+      const sum = pre[i + 24] - pre[i];
+      if (!best[curYear] || sum > best[curYear].total) best[curYear] = { year: curYear, startEpoch: h, total: sum };
+    }
+  }
+  const out = [];
+  for (const y of Object.keys(best)) if ((yrCnt[y] || 0) >= 4380) out.push(best[y]);
+  out.sort((a, b) => a.year - b.year);
+  return out;
+}
+
+// 流域逐日加權（同一天各站雨量依權重加權；有資料之站重新正規化）
+function annualMaxDailyWeighted(items) {
+  const byDate = new Map();
+  items.forEach(({ db, w }) => {
+    for (const [k, v] of Object.entries(db.dailyByDate)) {
+      const o = byDate.get(k) || { s: 0, w: 0 }; o.s += w * v; o.w += w; byDate.set(k, o);
+    }
+  });
+  const best = {}, cntYr = {};
+  for (const [k, o] of byDate) {
+    const y = k.slice(0, 4), v = o.s / o.w;
+    cntYr[y] = (cntYr[y] || 0) + 1;
+    if (!best[y] || v > best[y].v) best[y] = { v, date: k };
+  }
+  const out = [];
+  for (const y of Object.keys(best)) if (cntYr[y] >= 180) out.push({ year: +y, value: best[y].v, date: best[y].date });
+  out.sort((a, b) => a.year - b.year);
+  return out;
+}
+
+let basinRainCache = { key: "", val: null };
+// 回傳 { method, methodNote, years[], sample24[], hourly: {items, S, candidates[], usedStations[], excluded[]} | null }
+function buildBasinRainBasis(useList) {
+  const conv = getDayConvFactor();
+  const key = `${rainDataVersion}|${conv}|` + useList.map(s => `${s.id}:${s.weight.toFixed(5)}`).join(",");
+  if (basinRainCache.key === key) return basinRainCache.val;
+
+  const all = useList.map(st => ({ st, db: getStationDB(st), w: st.weight }));
+  const hItems = all.filter(x => stationHasHourly(x.db));
+  const dItems = all.filter(x => stationHasDaily(x.db));
+  const res = { method: "legacy", methodNote: "", years: [], sample24: [], hourly: null };
+
+  // 逐時流域序列與候選暴雨（僅由有時資料之站構成）
+  if (hItems.length > 0) {
+    const wS = hItems.reduce((a, x) => a + x.w, 0);
+    const items = hItems.map(x => ({ db: x.db, w: x.w / wS }));
+    const S = buildWeightedHourlySeries(items);
+    const wins = annualMax24Windows(S);
+    const sorted = [...wins].sort((a, b) => b.total - a.total);
+    const kept = [];
+    sorted.forEach(c => { if (!kept.some(k => Math.abs(k.startEpoch - c.startEpoch) < 24)) kept.push(c); });
+    const candidates = kept.slice(0, 20).map(c => ({
+      key: String(c.startEpoch), year: c.year, startEpoch: c.startEpoch, startLabel: hourLabelFromEpoch(c.startEpoch),
+      total: +c.total.toFixed(1),
+      hourly: Array.from({ length: 24 }, (_, j) => { const i = c.startEpoch - S.tMin + j; return S.has[i] ? +S.val[i].toFixed(2) : 0; })
+    }));
+    res.hourly = {
+      S, wins, candidates,
+      usedStations: hItems.map(x => ({ id: x.st.id, name: x.st.name, withdrawn: !!x.st.withdrawn, weight: x.w, effWeight: x.w / wS })),
+      excluded: all.filter(x => !stationHasHourly(x.db)).map(x => ({ id: x.st.id, name: x.st.name, withdrawn: !!x.st.withdrawn, weight: x.w }))
+    };
+  }
+
+  if (all.length > 0 && hItems.length === all.length) {
+    res.method = "hourly";
+    res.years = res.hourly.wins.map(w => String(w.year));
+    res.sample24 = res.hourly.wins.map(w => +w.total.toFixed(1));
+    res.methodNote = "各站逐時雨量依徐昇權重加成流域逐時雨量，逐年取連續 24 小時累積雨量之最大值（不需一日→24 小時換算）。";
+  } else if (all.length > 0 && dItems.length === all.length) {
+    const wS = all.reduce((a, x) => a + x.w, 0);
+    const rows = annualMaxDailyWeighted(all.map(x => ({ db: x.db, w: x.w / wS })));
+    res.method = "daily";
+    res.years = rows.map(r => String(r.year));
+    res.sample24 = rows.map(r => +(r.value * conv).toFixed(1));
+    res.dailyRows = rows;
+    res.conv = conv;
+    res.methodNote = `各站逐日雨量依徐昇權重於「同一天」加權，逐年取最大日雨量，再乘以一日→24 小時換算係數 ${conv.toFixed(2)}（${getDayConvLabel()}；水利署 96 年水文業務現代化綜合計畫）。`;
+  } else {
+    const yearMap = {};
+    all.forEach(({ db, w }) => {
+      for (const [yr, v] of Object.entries(db.ams24ByYear || {})) {
+        if (!yearMap[yr]) yearMap[yr] = { sum: 0, w: 0 };
+        yearMap[yr].sum += v * w; yearMap[yr].w += w;
+      }
+    });
+    res.years = Object.keys(yearMap).sort();
+    res.sample24 = res.years.map(yr => +(yearMap[yr].sum / yearMap[yr].w).toFixed(1));
+    res.methodNote = "部分採用站為程式內建舊資料（僅保存各站年最大值，無逐日/逐時資料），改以各站年最大值依權重加權，未做一日→24 小時換算；請上傳各站 CODiS Excel 以改用同一天加權法。";
+  }
+  basinRainCache = { key, val: res };
+  return res;
+}
+
+// ---- 雨型：場次勾選狀態 ----
+let stormSel = { sig: "", keys: new Set() };
+function resolveStormSelection(basis) {
+  const cands = basis.hourly ? basis.hourly.candidates : [];
+  const sig = rainDataVersion + "|" + cands.map(c => c.key).join(",");
+  if (stormSel.sig !== sig) {
+    stormSel = { sig, keys: new Set(cands.filter(c => c.total >= 50).slice(0, 6).map(c => c.key)) };
+  }
+  return cands.filter(c => stormSel.keys.has(c.key)).sort((a, b) => b.total - a.total);
+}
+
+function renderRainBasisPanel(basis, selected) {
+  const el = document.getElementById('rainBasisPanel');
+  if (!el) return;
+  const note = `<div style="color:#94a3b8;margin-bottom:4px;"><strong style="color:#7dd3fc;">年最大 24hr 樣本：</strong>${basis.methodNote}（${basis.years.length} 年）</div>`;
+  if (!basis.hourly || basis.hourly.candidates.length === 0) {
+    el.innerHTML = note + `<div style="color:#fbbf24;">雨型：採用站皆無時資料暴雨事件，使用內建預設同位序雨型。上傳含「時資料」工作表之 CODiS Excel 後，可在此勾選暴雨場次。</div>`;
+    return;
+  }
+  const h = basis.hourly;
+  const st = h.usedStations.map(x => `${x.name}${x.withdrawn ? '(撤銷站)' : ''} ${(x.effWeight * 100).toFixed(1)}%`).join("、");
+  const ex = h.excluded.length ? `<div style="color:#fbbf24;">未納入雨型（無時資料）：${h.excluded.map(x => x.name + (x.withdrawn ? '(撤銷站)' : '')).join("、")}</div>` : "";
+  const rows = h.candidates.map(c => `
+    <label style="display:flex;gap:6px;align-items:center;margin:1px 0;cursor:pointer;">
+      <input type="checkbox" class="stormEvChk" data-key="${c.key}" ${stormSel.keys.has(c.key) ? "checked" : ""} style="width:auto;margin:0;" />
+      <span>${c.startLabel} 起 24hr　<strong>${c.total.toFixed(1)} mm</strong>　(${c.year} 年最大)</span>
+    </label>`).join("");
+  el.innerHTML = note +
+    `<div style="color:#7dd3fc;"><strong>同位序雨型暴雨場次</strong>（流域加權逐時雨量；預設取雨量最大前 6 場，已選 ${selected.length} 場）</div>` +
+    `<div style="color:#94a3b8;">逐時加權站：${st}</div>${ex}` +
+    `<div style="max-height:150px;overflow:auto;margin-top:3px;padding:4px 6px;background:#0f172a;border-radius:4px;">${rows}</div>`;
+}
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t && t.classList && t.classList.contains('stormEvChk')) {
+    if (t.checked) stormSel.keys.add(t.dataset.key); else stormSel.keys.delete(t.dataset.key);
+    runFrequencyAndHydrology();
+  } else if (t && t.id === 'select_dayConv') {
+    runFrequencyAndHydrology();
+  }
+});
+
 // ============================================================================
 // 7. 執行水文演算、含砂水流與土石流尖峰流量計算、繪製不重疊歷線圖
 // ============================================================================
@@ -2144,42 +2374,30 @@ function runFrequencyAndHydrology() {
   }
 
   let wSumP = 0, wTotal = 0;
-  const yearMap = {};
   useList.forEach(st => {
     const db = getStationDB(st);
     wSumP += db.meanAnnualP * st.weight;
     wTotal += st.weight;
-    for (const [yr, v] of Object.entries(db.ams24ByYear)) {
-      if (!yearMap[yr]) yearMap[yr] = { sum: 0, w: 0 };
-      yearMap[yr].sum += v * st.weight;
-      yearMap[yr].w += st.weight;
-    }
   });
 
   const meanP = +(wSumP / wTotal).toFixed(1);
   document.getElementById('input_MeanAnnualP').value = meanP;
 
-  const amsYears = Object.keys(yearMap).sort();
-  const sample24 = amsYears.map(yr => +(yearMap[yr].sum / yearMap[yr].w).toFixed(1));
-  // 雨型：各採用站（需有時資料暴雨事件）各自求同位序雨型，再依徐昇權重加權平均並正規化為 100%
-  const stormSources = useList.map(st => {
-    const db = getStationDB(st);
-    const events = (db.stormEvents && db.stormEvents.length) ? db.stormEvents : null;
-    return { id: st.id, name: st.name, withdrawn: !!st.withdrawn, weight: st.weight, events,
-             pattern: db.stormPattern24 || DEFAULT_SAME_RANK_PCT_24HR, used: !!events, effWeight: 0 };
-  });
-  const stormUsed = stormSources.filter(x => x.used);
-  let stormPattern24;
-  if (stormUsed.length > 0) {
-    const wS = stormUsed.reduce((a, x) => a + x.weight, 0);
-    stormUsed.forEach(x => { x.effWeight = x.weight / wS; });
-    const avg = Array.from({ length: 24 }, (_, h) => stormUsed.reduce((a, x) => a + x.effWeight * x.pattern[h], 0));
-    const tot = avg.reduce((a, b) => a + b, 0);
-    stormPattern24 = avg.map(v => +(v * 100 / tot).toFixed(2));
+  const basis = buildBasinRainBasis(useList);
+  const amsYears = basis.years;
+  const sample24 = basis.sample24;
+  const selectedEvents = resolveStormSelection(basis);
+  renderRainBasisPanel(basis, selectedEvents);
+  const primaryDB = getStationDB(useList[0]);
+
+  // 雨型：所選暴雨場次（流域加權逐時雨量）→ 同位序法；未勾選任何場次或無時資料則用內建預設雨型
+  let stormPattern24, stormCalc = null;
+  if (selectedEvents.length > 0) {
+    stormCalc = computeSameRankPatternFromHourlyEvents(selectedEvents.map(e => e.hourly));
+    stormPattern24 = stormCalc.pattern;
   } else {
     stormPattern24 = [...DEFAULT_SAME_RANK_PCT_24HR];
   }
-  const primaryDB = getStationDB(useList[0]);
 
   const freq24 = analyzeStandardFrequency(sample24);
   const userChoice = document.getElementById('distSelect').value;
@@ -2191,7 +2409,7 @@ function runFrequencyAndHydrology() {
     bestDistBadge.textContent = `檢定通過: ${selectedCode}`;
     bestDistBadge.className = "badge ok";
   } else {
-    bestDistBadge.textContent = `擇優採用: ${selectedCode} (χ²最小)`;
+    bestDistBadge.textContent = `擇優採用: ${selectedCode} (SE最小)`;
     bestDistBadge.className = "badge warn";
   }
 
@@ -2206,7 +2424,7 @@ function runFrequencyAndHydrology() {
       <td><strong>${r.chiSq.toFixed(3)}</strong></td>
       <td>${r.chiCrit.toFixed(3)}</td>
       <td style="color:${r.pass ? '#4ade80' : (isSel ? '#facc15' : '#f87171')}; text-align:center;">
-        ${r.pass ? '是' : (isSel ? '否 (χ²最小擇優)' : '否')}
+        ${r.pass ? '是' : (isSel ? '否 (SE最小擇優)' : '否')}
       </td>
       <td>${r.seWeibull.toFixed(1)}</td>
       <td>${r.seHazen.toFixed(1)}</td>
@@ -2287,7 +2505,9 @@ function runFrequencyAndHydrology() {
     thiessen: [...currentThiessenList],
     primaryStation: useList[0],
     db: primaryDB,
-    stormSources,
+    basis,
+    stormEvents: selectedEvents,
+    stormCalc,
     amsYears,
     sample24,
     P_annual,
@@ -2762,7 +2982,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
         <tr>
           ${idx === 0 ? `<td rowspan="8" style="font-weight:bold;text-align:center;">${r.name}</td>` : ''}
           <td>${b.pi}</td><td>${b.fi}</td><td>${b.ei}</td><td>${b.xui}</td><td>${b.oi}</td><td>${b.chi_i}</td>
-          ${idx === 0 ? `<td rowspan="8" style="text-align:center;">${r.chiCrit.toFixed(3)}</td><td rowspan="8" style="text-align:center;font-weight:bold;">${r.pass ? '是' : (isSel ? '擇優採用(χ²最小)' : '否')}</td>` : ''}
+          ${idx === 0 ? `<td rowspan="8" style="text-align:center;">${r.chiCrit.toFixed(3)}</td><td rowspan="8" style="text-align:center;font-weight:bold;">${r.pass ? '是' : (isSel ? '擇優採用(SE最小)' : '否')}</td>` : ''}
         </tr>
       `;
     });
@@ -2785,63 +3005,53 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     <tr><td style="text-align:center;">Hazen SE</td>${distOrder.map(c => `<td>${d.freq24.results[c].seHazen.toFixed(1)}</td>`).join('')}</tr>
     <tr><td style="text-align:center;">Weibull SSE</td>${distOrder.map(c => `<td>${Math.round(d.freq24.results[c].sseWeibull)}</td>`).join('')}</tr>
     <tr><td style="text-align:center;">Weibull SE</td>${distOrder.map(c => `<td>${d.freq24.results[c].seWeibull.toFixed(1)}</td>`).join('')}</tr>
+    <tr><td style="text-align:center;">SE 序位 (Weibull/Hazen)</td>${distOrder.map(c => `<td>${d.freq24.results[c].rankW} / ${d.freq24.results[c].rankH}</td>`).join('')}</tr>
   `;
 
-  const rankOrder = [24, 22, 20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23];
   let table5Rows = "";
   d.stormPattern24.forEach((pct, idx) => {
     const pDepth = (d.freq24.results[d.selectedCode].quantiles[d.targetT] * pct / 100).toFixed(1);
-    table5Rows += `<tr><td style="text-align:center;">${idx + 1}</td><td>${pct.toFixed(2)}</td><td style="text-align:center;">${rankOrder[idx]}</td><td>${pDepth}</td></tr>`;
+    table5Rows += `<tr><td style="text-align:center;">${idx + 1}</td><td>${pct.toFixed(2)}</td><td style="text-align:center;">${RANK_AT_HOUR[idx]}</td><td>${pDepth}</td></tr>`;
   });
 
   const selDistObj = d.freq24.results[d.selectedCode];
 
-  // ---- 第五節：同位序法逐步計算（多站：各站各算，再依徐昇權重加權） ----
+  // ---- 第五節：同位序法逐步計算（先將各站逐時雨量依徐昇權重加成流域逐時雨量，再逐場排序、平均） ----
   const P24T = selDistObj.quantiles[d.targetT];
-  const srcs = d.stormSources || [];
-  const usedSrcs = srcs.filter(x => x.used);
-  let rankStepHTML = "", appendixHTML = "";
+  const evs = d.stormEvents || [];
+  const hb = d.basis && d.basis.hourly;
   const stLabel = x => `${x.name}${x.withdrawn ? '(撤銷站)' : ''}`;
-  let tn = 0;   // 表 5-n 計數
-  if (usedSrcs.length) {
-    rankStepHTML += `
-  <p><strong>計算方法：</strong>(1) 各採用雨量站分別以 CODiS 時資料逐年取 24 小時滑動視窗之最大雨量時段，選取不低於 80 mm 且雨量最大之前 3 場暴雨事件；(2) 事件逐時雨量除以該事件 24 小時總雨量得百分率 p<sub>j</sub> = P<sub>j</sub>/ΣP × 100%，並由大到小排序；(3) 同序位百分率取算術平均 p̄<sub>k</sub>；(4) 序位 1 置於第 13 小時，其餘序位依 2→第 12、3→第 14、4→第 11、5→第 15 小時……交錯排列於兩側，序位 24 置於第 1 小時，再正規化使總和為 100%，得該站同位序雨型；(5) 各站雨型依徐昇權重加權平均並正規化，得本集水區設計雨型。</p>`;
-    usedSrcs.forEach((x, si) => {
-      const evs = x.events;
-      const sortedP = evs.map(e => { const sm = e.hourly.reduce((a, b) => a + b, 0); return e.hourly.map(v => v / sm * 100).sort((a, b) => b - a); });
-      const meanP = Array.from({ length: 24 }, (_, k) => sortedP.reduce((a, arr) => a + arr[k], 0) / evs.length);
-      const meanSum = meanP.reduce((a, b) => a + b, 0);
-      const evRows = evs.map((e, i) => `<tr><td style="text-align:center;">${i + 1}</td><td style="text-align:center;">${e.year}</td><td style="text-align:center;">${e.startLabel || '-'}</td><td>${e.total.toFixed(1)}</td></tr>`).join('');
-      const rkRows = meanP.map((m, k) => `<tr><td style="text-align:center;">${k + 1}</td>${sortedP.map(arr => `<td>${arr[k].toFixed(2)}</td>`).join('')}<td>${m.toFixed(2)}</td><td style="text-align:center;">${rankOrder.indexOf(k + 1) + 1}</td></tr>`).join('');
-      const n1 = ++tn, n2 = ++tn;
-      rankStepHTML += `
-  <p><strong>（${si + 1}）${stLabel(x)}站（${x.id}）</strong>：選用暴雨事件如表 5-${n1}，各場逐時雨量詳附錄表 A-${si + 1}；逐事件百分率排序、同序位平均及配置時段如表 5-${n2}，平均後 Σp̄<sub>k</sub> = ${meanSum.toFixed(2)}%。</p>
-  <div class="caption">表 5-${n1} ${stLabel(x)}站同位序法選用暴雨事件一覽表</div>
-  <table><thead><tr><th>事件序</th><th>年份</th><th>24 小時視窗起始時間</th><th>24 小時雨量 (mm)</th></tr></thead><tbody>${evRows}</tbody></table>
-  <div class="caption">表 5-${n2} ${stLabel(x)}站同位序法各序位百分率計算表（單位：%）</div>
+  let rankStepHTML = "", appendixHTML = "";
+  if (evs.length && d.stormCalc && hb) {
+    const sortedP = d.stormCalc.sortedPct, meanP = d.stormCalc.meanRank;
+    const meanSum = meanP.reduce((a, b) => a + b, 0);
+    const stRows = hb.usedStations.map(x => `<tr><td style="text-align:center;">${x.id}</td><td style="text-align:center;">${stLabel(x)}</td><td>${(x.weight * 100).toFixed(1)}%</td><td>${(x.effWeight * 100).toFixed(1)}%</td></tr>`).join('');
+    const evRows = evs.map((e, i) => `<tr><td style="text-align:center;">${i + 1}</td><td style="text-align:center;">${e.year}</td><td style="text-align:center;">${e.startLabel}</td><td>${e.total.toFixed(1)}</td></tr>`).join('');
+    const rkRows = meanP.map((m, k) => `<tr><td style="text-align:center;">${k + 1}</td>${sortedP.map(arr => `<td>${arr[k].toFixed(2)}</td>`).join('')}<td>${m.toFixed(2)}</td><td style="text-align:center;">${RANK_HOUR[k + 1]}</td></tr>`).join('');
+    const aRows = Array.from({ length: 24 }, (_, j) => `<tr><td style="text-align:center;">${j + 1}</td>${evs.map(e => `<td>${e.hourly[j].toFixed(1)}</td>`).join('')}</tr>`).join('') +
+      `<tr style="background:#f1f5f9;font-weight:bold;"><td style="text-align:center;">合計</td>${evs.map(e => `<td>${e.total.toFixed(1)}</td>`).join('')}</tr>`;
+    rankStepHTML = `
+  <p><strong>步驟 1：流域逐時雨量。</strong>各採用站之 CODiS 逐時雨量依徐昇權重加權（P<sub>j</sub> = Σ w<sub>i</sub> P<sub>i,j</sub> / Σ w<sub>i</sub>，逐小時對有資料之站重新正規化），權重如表 5-1。${hb.excluded.length ? `<span style="color:#b45309;">未納入（無時資料）：${hb.excluded.map(x => `${stLabel(x)}（徐昇權重 ${(x.weight * 100).toFixed(1)}%）`).join('、')}。</span>` : ''}</p>
+  <div class="caption">表 5-1 雨型分析採用雨量站及權重</div>
+  <table><thead><tr><th>站號</th><th>站名</th><th>徐昇權重</th><th>雨型分析採用權重（重新正規化）</th></tr></thead><tbody>${stRows}</tbody></table>
+  <p><strong>步驟 2：選取暴雨事件。</strong>以流域逐時雨量逐年取連續 24 小時累積雨量最大之時段，由其中雨量較大者挑選 ${evs.length} 場作為代表暴雨（程式預設取最大前 6 場，使用者可於程式中增減勾選），如表 5-2；各場逐時雨量詳附錄表 A-1。</p>
+  <div class="caption">表 5-2 同位序法選用暴雨事件一覽表</div>
+  <table><thead><tr><th>事件序</th><th>年份</th><th>24 小時視窗起始時間</th><th>24 小時流域雨量 (mm)</th></tr></thead><tbody>${evRows}</tbody></table>
+  <p><strong>步驟 3：逐時雨量百分率。</strong>各場第 <em>j</em> 小時雨量 P<sub>j</sub> 除以該場 24 小時總雨量，p<sub>j</sub> = P<sub>j</sub> / ΣP × 100%，再由大到小排序，得序位 1（最大）至序位 24（最小）之百分率。</p>
+  <p><strong>步驟 4：同序位平均。</strong>各場相同序位之百分率取算術平均，p̄<sub>k</sub> = (1/${evs.length}) Σ p<sub>k,i</sub>（k = 序位 1~24），Σp̄<sub>k</sub> = ${meanSum.toFixed(2)}%，結果如表 5-3。</p>
+  <p><strong>步驟 5：依同位序排列（集中型）。</strong>序位 1 置於第 12 小時，序位 2 置於第 13 小時、序位 3 置於第 11 小時、序位 4 置於第 14 小時……左右交錯，序位 24 置於第 24 小時、序位 23 置於第 1 小時（表 5-3 末欄為配置時段）；排列後再正規化使 24 個時段總和為 100.00%，即得設計雨型，如圖 3 及表 5 所示。</p>
+  <div class="caption">表 5-3 同位序法各序位百分率計算表（單位：%）</div>
   <table><thead><tr><th>序位 k</th>${evs.map((e, i) => `<th>事件 ${i + 1}<br>(${e.year})</th>`).join('')}<th>平均 p̄<sub>k</sub></th><th>配置時段 (hr)</th></tr></thead><tbody>${rkRows}
-  <tr style="background:#f1f5f9;font-weight:bold;"><td style="text-align:center;">合計</td>${sortedP.map(arr => `<td>${arr.reduce((a, b) => a + b, 0).toFixed(2)}</td>`).join('')}<td>${meanSum.toFixed(2)}</td><td></td></tr></tbody></table>`;
-      const aRows = Array.from({ length: 24 }, (_, j) => `<tr><td style="text-align:center;">${j + 1}</td>${evs.map(e => `<td>${e.hourly[j].toFixed(1)}</td>`).join('')}</tr>`).join('') +
-        `<tr style="background:#f1f5f9;font-weight:bold;"><td style="text-align:center;">合計</td>${evs.map(e => `<td>${e.total.toFixed(1)}</td>`).join('')}</tr>`;
-      appendixHTML += `
-  <div class="caption">表 A-${si + 1} ${stLabel(x)}站選用暴雨事件逐時雨量（單位：mm；第 1 小時為視窗起始時間）</div>
-  <table><thead><tr><th>視窗內時序 (hr)</th>${evs.map((e, i) => `<th>事件 ${i + 1}<br>${e.startLabel || e.year}</th>`).join('')}</tr></thead><tbody>${aRows}</tbody></table>`;
-    });
-    if (appendixHTML) appendixHTML = `\n  <h3>附錄　同位序法選用暴雨事件逐時雨量</h3>` + appendixHTML;
-
-    const nW = ++tn;
-    const excl = srcs.filter(x => !x.used);
-    const wRows = Array.from({ length: 24 }, (_, h) => `<tr><td style="text-align:center;">${h + 1}</td>${usedSrcs.map(x => `<td>${x.pattern[h].toFixed(2)}</td>`).join('')}<td><strong>${d.stormPattern24[h].toFixed(2)}</strong></td></tr>`).join('');
-    rankStepHTML += `
-  <p><strong>各站雨型加權：</strong>${usedSrcs.length > 1 ? `以徐昇權重（${usedSrcs.map(x => `${stLabel(x)} ${(x.effWeight * 100).toFixed(1)}%`).join('、')}${excl.length ? '，已改以有時資料暴雨事件之站重新正規化' : ''}）` : `僅 ${stLabel(usedSrcs[0])} 有時資料暴雨事件，權重 100%，`}p<sub>j</sub> = Σ (w<sub>i</sub> × p<sub>i,j</sub>)，再正規化使總和為 100%，結果如表 5-${nW} 及表 5。</p>
-  ${excl.length ? `<p style="color:#b45309;">※ 下列採用站未提供時資料暴雨事件，未納入雨型加權（仍參與雨量頻率分析）：${excl.map(x => `${stLabel(x)}（${x.id}，徐昇權重 ${(x.weight * 100).toFixed(1)}%）`).join('、')}。上傳該站含「時資料」工作表之 CODiS Excel 後即可納入。</p>` : ''}
-  <div class="caption">表 5-${nW} 各站同位序雨型與徐昇加權雨型（單位：%）</div>
-  <table><thead><tr><th>時間 (hr)</th>${usedSrcs.map(x => `<th>${stLabel(x)}<br>(權重 ${(x.effWeight * 100).toFixed(1)}%)</th>`).join('')}<th>加權雨型</th></tr></thead><tbody>${wRows}</tbody></table>
-  <p><strong>設計雨量分配：</strong>各時段設計雨量 P<sub>j</sub>(T) = P<sub>24</sub>(T) × p<sub>j</sub> / 100。以 ${d.targetT} 年重現期為例，P<sub>24</sub>(${d.targetT}) = ${P24T.toFixed(1)} mm（${selDistObj.name}），最大時段 p<sub>max</sub> = ${Math.max(...d.stormPattern24).toFixed(2)}%，最大時段雨量 = ${P24T.toFixed(1)} × ${Math.max(...d.stormPattern24).toFixed(2)}% = ${(P24T * Math.max(...d.stormPattern24) / 100).toFixed(1)} mm，其餘時段如表 5 所示。</p>`;
+  <tr style="background:#f1f5f9;font-weight:bold;"><td style="text-align:center;">合計</td>${sortedP.map(arr => `<td>${arr.reduce((a, b) => a + b, 0).toFixed(2)}</td>`).join('')}<td>${meanSum.toFixed(2)}</td><td></td></tr></tbody></table>
+  <p><strong>步驟 6：設計雨量分配。</strong>各時段設計雨量 P<sub>j</sub>(T) = P<sub>24</sub>(T) × p<sub>j</sub> / 100。以 ${d.targetT} 年重現期為例，P<sub>24</sub>(${d.targetT}) = ${P24T.toFixed(1)} mm（${selDistObj.name}），最大時段 p<sub>max</sub> = ${Math.max(...d.stormPattern24).toFixed(2)}%，最大時段雨量 = ${P24T.toFixed(1)} × ${Math.max(...d.stormPattern24).toFixed(2)}% = ${(P24T * Math.max(...d.stormPattern24) / 100).toFixed(1)} mm，其餘時段如表 5 所示。</p>`;
+    appendixHTML = `
+  <h3>附錄　同位序法選用暴雨事件逐時雨量</h3>
+  <div class="caption">表 A-1 選用暴雨事件流域逐時雨量（單位：mm；第 1 小時為視窗起始時間）</div>
+  <table><thead><tr><th>視窗內時序 (hr)</th>${evs.map((e, i) => `<th>事件 ${i + 1}<br>${e.startLabel}</th>`).join('')}</tr></thead><tbody>${aRows}</tbody></table>`;
   } else {
     rankStepHTML = `
-  <p>同位序法之計算步驟為：(1) 各採用站逐年以 24 小時滑動視窗選出年最大 24 小時暴雨事件，取不低於 80 mm 且雨量最大之前 3 場；(2) 事件逐時雨量除以 24 小時總雨量得百分率 p<sub>j</sub> = P<sub>j</sub>/ΣP × 100% 並由大到小排序；(3) 同序位取算術平均；(4) 序位 1 置於第 13 小時，其餘交錯排列於兩側，再正規化為 100%；(5) 多站時依徐昇權重加權平均。</p>
-  <p style="color:#b45309;">※ 本次採用之雨量站（${srcs.map(stLabel).join('、')}）均未保存時資料暴雨事件，雨型採程式內建預設同位序雨型，無法列出逐步計算；上傳各站含「時資料」工作表之 CODiS Excel 後即可產出完整計算過程。</p>`;
+  <p>同位序法之計算步驟為：(1) 各採用站逐時雨量依徐昇權重加成流域逐時雨量；(2) 逐年取連續 24 小時最大暴雨並挑選代表場次；(3) 各場逐時雨量除以 24 小時總雨量得百分率 p<sub>j</sub> = P<sub>j</sub>/ΣP × 100% 並由大到小排序；(4) 同序位取算術平均；(5) 序位 1 置於第 12 小時，序位 2 置於第 13 小時、序位 3 置於第 11 小時……左右交錯排列，再正規化為 100%。</p>
+  <p style="color:#b45309;">※ 本次未取得可用之時資料暴雨場次（採用站無時資料，或未勾選任何場次），雨型採程式內建預設同位序雨型，無法列出逐步計算；上傳含「時資料」工作表之 CODiS Excel 並勾選暴雨場次後即可產出完整計算過程。</p>`;
   }
 
   // ---- 第六節：集流時間、無因次降雨強度、單位歷線步驟 ----
@@ -2994,7 +3204,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </table>
 
   <h3>三、降雨量分析</h3>
-  <p>經統計分析選用雨量站歷年降雨紀錄，計畫區徐昇加權年平均降雨量為 <strong>${d.P_annual.toFixed(1)} mm</strong>，歷年最大 24 小時暴雨量彙整如表 2 所示。</p>
+  <p>經統計分析選用雨量站歷年降雨紀錄，計畫區徐昇加權年平均降雨量為 <strong>${d.P_annual.toFixed(1)} mm</strong>，歷年最大 24 小時暴雨量彙整如表 2 所示。年最大 24 小時暴雨量之推求方式：${d.basis ? d.basis.methodNote : ''}</p>
 
   <div class="caption">表 2 集水區歷年最大 24 小時暴雨量一覽表（單位：mm）</div>
   <table>
@@ -3003,7 +3213,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </table>
 
   <h3>四、暴雨頻率分析與適合度檢定</h3>
-  <p>依據歷年最大一日暴雨量，分別以二參數對數常態（LN2）、三參數對數常態（LN3）、皮爾遜第三型（PT3）、對數皮爾遜第三型（LP3）及極端值第一型（EV1）等五種機率分布進行頻率分析，並以卡方檢定（Chi-Square test，分組數 k=7）進行適合度檢定，再配合平方差和（SSE）與標準誤差（SE）綜合評估，${selDistObj.pass ? `選定通過卡方檢定且卡方值最小之最佳統計分布為 <strong>${selDistObj.name}（χ² = ${selDistObj.chiSq.toFixed(3)}）</strong>` : `考量山區極端颱風暴雨集中特性，擇優選定卡方分析值最小（最貼近理論分布）之統計分布為 <strong>${selDistObj.name}（χ² = ${selDistObj.chiSq.toFixed(3)}）</strong>`}，成果如表 3 及表 4 所示。</p>
+  <p>依據歷年最大 24 小時暴雨量，分別以二參數對數常態（LN2）、三參數對數常態（LN3）、皮爾遜第三型（PT3）、對數皮爾遜第三型（LP3）及極端值第一型（EV1）等五種機率分布進行頻率分析，並以卡方檢定（Chi-Square test，分組數 k=7、顯著水準 5%）進行適合度檢定；通過檢定者再以平方差和（SSE）與標準誤差（SE = [SSE/(n−r)]<sup>1/2</sup>，n 為資料年數、r 為分布參數個數）之 Weibull 與 Hazen 兩種標繪法比較，取兩法 SE 序位總和最小者為最佳分布。本次選用 <strong>${selDistObj.name}</strong>（χ² = ${selDistObj.chiSq.toFixed(3)}，${selDistObj.pass ? '通過卡方檢定' : '五種分布均未通過卡方檢定，改依 SE 序位擇優'}；SE 序位 Weibull ${selDistObj.rankW}、Hazen ${selDistObj.rankH}），成果如表 3 及表 4 所示。</p>
 
   <div class="caption">表 3 最大 24 小時暴雨機率分布卡方檢定成果表</div>
   <table>
@@ -3022,7 +3232,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </table>
 
   <h3>五、雨型設計（同位序法）</h3>
-  <p>本集水區之雨型設計參採同位序法進行，將每時段雨量所佔 24 小時總雨量之百分率求出並按同位序排列（最大值居於第 13 小時，其餘依序向兩側遞減），時間分配型態如圖 3 及表 5 所示，計算步驟說明如下。</p>
+  <p>本集水區之雨型設計參採同位序法進行，將每時段雨量所佔 24 小時總雨量之百分率求出並按同位序排列（最大值居於第 12 小時，其餘依序向兩側遞減），時間分配型態如圖 3 及表 5 所示，計算步驟說明如下。</p>
   ${rankStepHTML}
 
   <div class="fig-box">
