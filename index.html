@@ -285,6 +285,11 @@
       每個控制點各自：DEM 劃設集水區 → 徐昇權重 → 24hr 暴雨頻率分析 → 設計雨量 → 洪峰流量（共用上方 C、α、CN、歷線法等參數）。各點洪峰為獨立結果，<strong>不做歷線匯流演算、也不可直接相加</strong>（支流匯入主流處之匯流需另行以歷線演算）。點列表中的點可切換檢視、修改雨量站勾選，系統會自動更新該點。
     </div>
     <div id="cpList" style="max-height:200px; overflow:auto; font-size:11.5px;"></div>
+    <div id="cpSharedNote" style="font-size:11px; color:#fde68a; line-height:1.5; margin-top:4px;"></div>
+    <details id="cpMergedBox" open style="margin-top:6px;"><summary style="cursor:pointer; font-size:12px; color:#7dd3fc;">合併成果表（主流＋支流）</summary>
+      <div id="cpMerged" style="overflow:auto; margin-top:4px;"></div>
+      <button id="btnCpPop" class="secondary" style="width:auto; padding:2px 10px; margin:4px 0 0 0; font-size:11px;">在新視窗放大檢視</button>
+    </details>
     <div class="grid-2" style="margin-top:6px;">
       <button id="btnCpRecalc" class="secondary" style="margin-bottom:0;">重算全部控制點</button>
       <button id="btnCpClear" class="secondary" style="margin-bottom:0;">清除全部控制點</button>
@@ -870,6 +875,9 @@ let controlPoints = [];
 let activePointId = null;
 let restoringPoint = false;
 let cpSeq = 0;
+let multiShared = null;          // 多點共用：統一分布 + 共用雨型
+let inSharedRecalc = false;
+let sharedTimer = null;
 const isMultiMode = () => { const el = document.getElementById('chkMultiMode'); return !!(el && el.checked); };
 
 // ============================================================================
@@ -2635,19 +2643,26 @@ function runFrequencyAndHydrology() {
   } else {
     stormPattern24 = [...DEFAULT_SAME_RANK_PCT_24HR];
   }
+  // 多控制點：統一分布與共用雨型（取面積最大控制點之雨型）；本點自身雨型另存供彙整判定
+  const ownStorm = { pattern: [...stormPattern24], calc: stormCalc, events: selectedEvents };
+  const multiActive = isMultiMode() && !!activePointId && !!multiShared;
+  let usedEvents = selectedEvents;
+  if (multiActive && multiShared.pattern) {
+    stormPattern24 = [...multiShared.pattern]; stormCalc = multiShared.calc; usedEvents = multiShared.events;
+  }
   {
     const cb = document.getElementById('cumCurveBox');
     if (cb) {
-      if (selectedEvents.length > 0) {
+      if (usedEvents.length > 0) {
         cb.style.display = 'block';
-        cb.innerHTML = `<div style="color:#0f172a;font-size:12px;font-weight:bold;margin:2px 4px;">暴雨場次 24 小時累積雨量曲線（細線＝各場，粗黑線＝設計雨型；x：小時，y：累積 %）</div>` + cumulativeCurveSVG(selectedEvents, stormPattern24, 640, 330);
+        cb.innerHTML = `<div style="color:#0f172a;font-size:12px;font-weight:bold;margin:2px 4px;">暴雨場次 24 小時累積雨量曲線（細線＝各場，粗黑線＝設計雨型；x：小時，y：累積 %）</div>` + cumulativeCurveSVG(usedEvents, stormPattern24, 640, 330);
       } else { cb.style.display = 'none'; cb.innerHTML = ''; }
     }
   }
 
   const freq24 = analyzeStandardFrequency(sample24);
   const userChoice = document.getElementById('distSelect').value;
-  const selectedCode = userChoice === "AUTO" ? freq24.bestCode : userChoice;
+  const selectedCode = userChoice === "AUTO" ? ((multiActive && multiShared.dist) ? multiShared.dist : freq24.bestCode) : userChoice;
   const targetT = parseInt(document.getElementById('returnPeriodSelect').value);
   const stationFreqs = computeStationFrequencies(useList, basis.convInfo);
   {
@@ -2774,8 +2789,11 @@ function runFrequencyAndHydrology() {
     primaryStation: useList[0],
     db: primaryDB,
     basis,
-    stormEvents: selectedEvents,
+    stormEvents: usedEvents,
     stormCalc,
+    ownStorm,
+    sharedSig: (multiActive ? multiShared.core : '') + '|' + cpParamSig(),
+    sharedFrom: multiActive ? multiShared.srcName : null,
     amsYears,
     sample24,
     P_annual,
@@ -3756,6 +3774,7 @@ function syncActiveControlPoint() {
   pt.d = lastReportData;
   pt.uncheckedIds = currentThiessenList.filter(x => !x.checked).map(x => x.id);
   renderControlPointList();
+  if (!inSharedRecalc) { clearTimeout(sharedTimer); sharedTimer = setTimeout(applyMultiShared, 50); }
 }
 
 function drawControlPointsLayer() {
@@ -3775,6 +3794,7 @@ function renderControlPointList() {
   if (!el) return;
   if (badge) badge.textContent = `${controlPoints.length} 點`;
   drawControlPointsLayer();
+  renderMergedTables();
   if (controlPoints.length === 0) { el.innerHTML = '<div style="color:#94a3b8;">尚無控制點。勾選「啟用多控制點模式」後，於地圖河道上點選。</div>'; return; }
   const rows = controlPoints.map((pt, i) => {
     const d = pt.d, act = pt.id === activePointId;
@@ -3824,11 +3844,12 @@ document.addEventListener('click', e => {
     controlPoints = controlPoints.filter(x => x.id !== t.dataset.id);
     if (activePointId === t.dataset.id) activePointId = null;
     renderControlPointList();
+    clearTimeout(sharedTimer); sharedTimer = setTimeout(applyMultiShared, 50);
   }
 });
 document.getElementById('btnCpClear').addEventListener('click', () => {
   if (controlPoints.length && !confirm("確定清除全部控制點？")) return;
-  controlPoints = []; activePointId = null; cpSeq = 0; renderControlPointList();
+  controlPoints = []; activePointId = null; cpSeq = 0; multiShared = null; renderControlPointList();
 });
 document.getElementById('btnCpRecalc').addEventListener('click', () => {
   if (!controlPoints.length) return;
@@ -3843,17 +3864,112 @@ document.getElementById('chkMultiMode').addEventListener('change', e => {
 });
 
 function cpRows() { return controlPoints.filter(pt => pt.d); }
-function buildMultiPointCSV() {
+function cpParamSig() {
+  const g = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  return ['input_C', 'input_alpha', 'input_CN', 'select_uhMethod', 'returnPeriodSelect', 'distSelect', 'select_dayConv', 'input_overland_l', 'input_overland_v'].map(g).join(',');
+}
+const CP_DIST_NAME = { LN2: "Log-Normal II", LN3: "Log-Normal III", PT3: "Pearson III", LP3: "Log-Pearson III", GUMBEL: "Extreme I" };
+const cpGroupOrder = pts => [...pts].sort((a, b) => (a.type === b.type ? 0 : a.type === '主流' ? -1 : 1));
+
+// 統一分布：各點卡方通過數最多者優先，其次各點 (Weibull+Hazen) SE 序位總和最小，再比 Hazen SE 總和
+function deriveShared(pts) {
+  const codes = Object.keys(pts[0].d.freq24.results);
+  const scores = {};
+  codes.forEach(c => {
+    let pass = 0, rank = 0, seH = 0;
+    pts.forEach(pt => { const r = pt.d.freq24.results[c]; if (r.pass) pass++; rank += r.rankW + r.rankH; seH += r.seHazen; });
+    scores[c] = { pass, rank, seH };
+  });
+  const userChoice = (document.getElementById('distSelect') || {}).value || "AUTO";
+  const best = [...codes].sort((x, y) => scores[y].pass - scores[x].pass || scores[x].rank - scores[y].rank || scores[x].seH - scores[y].seH)[0];
+  const dist = userChoice !== "AUTO" ? userChoice : best;
+  // 共用雨型：取集水面積最大之控制點自身雨型（含有時資料暴雨場次者優先）
+  const withStorm = pts.filter(pt => pt.d.ownStorm && pt.d.ownStorm.events.length > 0);
+  const pool = withStorm.length ? withStorm : pts;
+  const src = [...pool].sort((a, b) => b.d.watershed.A_ha - a.d.watershed.A_ha)[0];
+  const o = src.d.ownStorm;
+  const core = `${dist}|${src.id}|${o.pattern.join(',')}`;
+  return { dist, best, scores, userChoice, pattern: o.pattern, calc: o.calc, events: o.events, srcId: src.id, srcName: src.name, hasEvents: o.events.length > 0, core };
+}
+
+function applyMultiShared() {
+  if (inSharedRecalc || !isMultiMode()) return;
   const pts = cpRows();
-  let csv = "﻿多控制點洪峰彙整表（各點獨立計算，未做匯流疊加）\n";
-  csv += "編號,名稱,類型,TWD97_X,TWD97_Y,A(ha),L(m),H(m),Tc(hr),方法,採用分布," + RETURN_PERIODS.map(T => `P24_${T}yr(mm)`).join(",") + "," + RETURN_PERIODS.map(T => `Q${T}_清水(cms)`).join(",") + "," + RETURN_PERIODS.map(T => `Qs${T}_含砂(cms)`).join(",") + "\n";
+  if (pts.length < 2) { multiShared = null; renderMergedTables(); return; }
+  const sh = deriveShared(pts);
+  const sig = sh.core + '|' + cpParamSig();
+  multiShared = sh;
+  if (pts.some(p => p.d.sharedSig !== sig)) {
+    inSharedRecalc = true;
+    try {
+      const keep = activePointId;
+      setStatus("多控制點：套用統一分布與共用雨型，重算全部控制點...");
+      controlPoints.forEach(pt => restoreControlPoint(pt.id));
+      if (keep && controlPoints.some(x => x.id === keep)) restoreControlPoint(keep);
+      setStatus(`✅ 多控制點已套用統一分布（${CP_DIST_NAME[sh.dist] || sh.dist}）與共用雨型（取自${sh.srcName}），共 ${controlPoints.length} 點。`);
+    } finally { inSharedRecalc = false; }
+  }
+  renderMergedTables();
+}
+
+function cpSharedText(pts) {
+  const sh = multiShared;
+  if (!sh || pts.length < 2) return "";
+  const sc = Object.keys(sh.scores).map(c => `${CP_DIST_NAME[c] || c}：通過 ${sh.scores[c].pass}/${pts.length} 點、SE 序位和 ${sh.scores[c].rank}`).join("；");
+  return `統一分布：<strong>${CP_DIST_NAME[sh.dist] || sh.dist}</strong>（${sh.userChoice !== 'AUTO' ? '使用者指定' : '各點卡方通過數最多者優先，其次 SE 序位總和最小'}）；各分布評分：${sc}。共用雨型：取自面積最大之「${sh.srcName}」${sh.hasEvents ? '' : '（該點無時資料暴雨場次，使用內建預設雨型）'}。`;
+}
+
+// 合併成果表：主流＋支流同表（洪峰／含砂／土石流；設計雨量；各點五種分布並排）
+function cpMergedHTML(pts, web) {
+  const T = RETURN_PERIODS, f1 = v => v.toFixed(1), f2 = v => v.toFixed(2);
+  const tbl = web ? 'style="width:100%;border-collapse:collapse;font-size:11px;color:#e2e8f0;" border="1"' : 'border="1"';
+  const cap = t => web ? `<div style="font-weight:bold;margin:8px 0 2px;color:#7dd3fc;">${t}</div>` : `<div class="caption">${t}</div>`;
+  const th = `<th>${T.join('年</th><th>')}年</th>`;
+  const ord = cpGroupOrder(pts);
+  const d0 = ord[0].d, tT = d0.targetT;
+  const peakRows = ord.map(pt => {
+    const d = pt.d, w = d.watershed, isL = w.A_ha >= 1000, ser = isL ? d.rowUH : d.rowRat;
+    const isDf = d.dfMetrics && d.dfMetrics.isDebris;
+    const info = `<td rowspan="3" style="text-align:center;">${pt.name}</td><td rowspan="3" style="text-align:center;">${pt.type}</td><td rowspan="3">${f1(w.A_ha)}</td><td rowspan="3">${f1(w.L_m)}</td><td rowspan="3">${f1(w.H_m)}</td><td rowspan="3">${f2(w.Tc_hr)}</td><td rowspan="3" style="text-align:center;">${isL ? d.uhMethodLabel : '合理化公式'}</td>`;
+    return `<tr>${info}<td style="text-align:center;">清水 Q<sub>p</sub></td>${ser.map(q => `<td><strong>${f2(q)}</strong></td>`).join('')}</tr>` +
+      `<tr><td style="text-align:center;">含砂 Q<sub>s</sub></td>${ser.map(q => `<td>${f2(q * (1 + d.alphaPct))}</td>`).join('')}</tr>` +
+      `<tr style="${isDf ? 'background:' + (web ? '#7f1d1d' : '#fef2f2') + ';' : ''}"><td style="text-align:center;">土石流 Q<sub>d</sub></td>${isDf ? d.rowDebris.map(q => `<td>${f2(q)}</td>`).join('') : T.map(() => '<td style="text-align:center;">－</td>').join('')}</tr>`;
+  }).join('');
+  const rainRows = ord.map(pt => {
+    const r = pt.d.freq24.results[pt.d.selectedCode];
+    return `<tr><td style="text-align:center;">${pt.name}</td><td style="text-align:center;">${pt.type}</td><td>${pt.d.sample24.length}</td><td style="text-align:center;">${CP_DIST_NAME[pt.d.selectedCode] || pt.d.selectedCode}</td>${T.map(t => `<td>${f1(r.quantiles[t])}</td>`).join('')}</tr>`;
+  }).join('');
+  const codes = Object.keys(d0.freq24.results);
+  const freqRows = ord.map(pt => `<tr><td style="text-align:center;">${pt.name}</td>${codes.map(c => { const r = pt.d.freq24.results[c]; const sel = c === pt.d.selectedCode; return `<td style="${sel ? 'font-weight:bold;background:' + (web ? '#1e3a8a' : '#fef9c3') + ';' : ''}">${f1(r.quantiles[tT])}<br><span style="font-size:0.85em;">χ²=${r.chiSq.toFixed(2)}${r.pass ? '' : '✗'}／序位和${r.rankW + r.rankH}</span></td>`; }).join('')}</tr>`).join('');
+  return cap('表 1 各控制點洪峰流量合併表（單位：cms；主流在前、支流在後）') +
+    `<table ${tbl}><thead><tr><th>控制點</th><th>類型</th><th>A (ha)</th><th>L (m)</th><th>H (m)</th><th>t<sub>c</sub> (hr)</th><th>方法</th><th>流量類別</th>${th}</tr></thead><tbody>${peakRows}</tbody></table>` +
+    cap('表 2 各控制點設計 24 小時暴雨量（mm；統一分布）') +
+    `<table ${tbl}><thead><tr><th>控制點</th><th>類型</th><th>樣本年數</th><th>採用分布</th>${th}</tr></thead><tbody>${rainRows}</tbody></table>` +
+    cap(`表 3 各控制點五種分布之 ${tT} 年 24 小時雨量並排（mm；粗體＝採用；✗＝卡方未通過）`) +
+    `<table ${tbl}><thead><tr><th>控制點</th>${codes.map(c => `<th>${CP_DIST_NAME[c] || c}</th>`).join('')}</tr></thead><tbody>${freqRows}</tbody></table>`;
+}
+
+function renderMergedTables() {
+  const box = document.getElementById('cpMerged'), note = document.getElementById('cpSharedNote');
+  if (!box) return;
+  const pts = cpRows();
+  if (note) note.innerHTML = cpSharedText(pts);
+  box.innerHTML = pts.length ? cpMergedHTML(pts, true) : '<div style="color:#94a3b8;font-size:11px;">尚無已完成演算之控制點。</div>';
+}
+
+function buildMultiPointCSV() {
+  const pts = cpGroupOrder(cpRows());
+  const T = RETURN_PERIODS;
+  let csv = "﻿多控制點洪峰彙整表（各點獨立計算，未做匯流疊加；統一分布、共用雨型）\n";
+  csv += "編號,名稱,類型,TWD97_X,TWD97_Y,A(ha),L(m),H(m),Tc(hr),方法,採用分布," + T.map(t => `P24_${t}yr(mm)`).join(",") + "," + T.map(t => `Q${t}_清水`).join(",") + "," + T.map(t => `Qs${t}_含砂`).join(",") + "," + T.map(t => `Qd${t}_土石流`).join(",") + "\n";
   pts.forEach((pt, i) => {
-    const d = pt.d, w = d.watershed, isL = w.A_ha >= 1000;
-    const ser = isL ? d.rowUH : d.rowRat;
+    const d = pt.d, w = d.watershed, isL = w.A_ha >= 1000, ser = isL ? d.rowUH : d.rowRat;
+    const isDf = d.dfMetrics && d.dfMetrics.isDebris;
     csv += [i + 1, pt.name, pt.type, w.outletTWD97.x, w.outletTWD97.y, w.A_ha.toFixed(1), w.L_m.toFixed(1), w.H_m.toFixed(1), w.Tc_hr.toFixed(2),
       isL ? d.uhMethodLabel : "合理化公式", d.selectedCode,
-      ...RETURN_PERIODS.map(T => d.freq24.results[d.selectedCode].quantiles[T].toFixed(1)),
-      ...ser.map(q => q.toFixed(2)), ...ser.map(q => (q * (1 + d.alphaPct)).toFixed(2))].join(",") + "\n";
+      ...T.map(t => d.freq24.results[d.selectedCode].quantiles[t].toFixed(1)),
+      ...ser.map(q => q.toFixed(2)), ...ser.map(q => (q * (1 + d.alphaPct)).toFixed(2)),
+      ...(isDf ? d.rowDebris.map(q => q.toFixed(2)) : T.map(() => "-"))].join(",") + "\n";
   });
   return csv;
 }
@@ -3864,68 +3980,50 @@ document.getElementById('btnCpCsv').addEventListener('click', () => {
   a.download = `多控制點洪峰彙整_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
 });
 
-function multiPointReportHTML(pts, mapImgs) {
-  const f1 = v => v.toFixed(1), f2 = v => v.toFixed(2);
-  const d0 = pts[0].d;
-  const ci = d0.basis && d0.basis.convInfo;
-  const T = RETURN_PERIODS;
-  const th = `<th>${T.join('年</th><th>')}年</th>`;
-  const sumRows = pts.map((pt, i) => {
-    const w = pt.d.watershed, isL = w.A_ha >= 1000, ser = isL ? pt.d.rowUH : pt.d.rowRat;
-    return `<tr><td style="text-align:center;">${i + 1}</td><td style="text-align:center;">${pt.name}</td><td style="text-align:center;">${pt.type}</td><td>${w.outletTWD97.x}<br>${w.outletTWD97.y}</td><td>${f1(w.A_ha)}</td><td>${f1(w.L_m)}</td><td>${f1(w.H_m)}</td><td>${f2(w.Tc_hr)}</td><td style="text-align:center;">${isL ? pt.d.uhMethodLabel : '合理化公式'}</td>${ser.map(q => `<td>${f2(q)}</td>`).join('')}</tr>`;
-  }).join('');
-  const rainRows = pts.map((pt, i) => {
-    const r = pt.d.freq24.results[pt.d.selectedCode];
-    return `<tr><td style="text-align:center;">${pt.name}</td><td style="text-align:center;">${pt.d.sample24.length}</td><td style="text-align:center;">${r.name}</td>${T.map(t => `<td>${f1(r.quantiles[t])}</td>`).join('')}</tr>`;
-  }).join('');
-  const sedRows = pts.map(pt => {
-    const w = pt.d.watershed, ser = w.A_ha >= 1000 ? pt.d.rowUH : pt.d.rowRat;
-    return `<tr><td style="text-align:center;">${pt.name}</td><td>Q<sub>s</sub> (α=${(pt.d.alphaPct * 100).toFixed(0)}%)</td>${ser.map(q => `<td>${f2(q * (1 + pt.d.alphaPct))}</td>`).join('')}</tr>` +
-      (pt.d.dfMetrics && pt.d.dfMetrics.isDebris ? `<tr style="background:#fef2f2;"><td style="text-align:center;">${pt.name}</td><td>Q<sub>d</sub> (C<sub>d</sub>=${pt.d.dfMetrics.Cd.toFixed(3)})</td>${pt.d.rowDebris.map(q => `<td>${f2(q)}</td>`).join('')}</tr>` : '');
-  }).join('');
-  const detail = pts.map((pt, i) => {
-    const d = pt.d, w = d.watershed, tw = w.outletTWD97, isL = w.A_ha >= 1000;
-    const stRows = d.thiessen.filter(x => x.checked).map(x => `<tr><td style="text-align:center;">${x.id}</td><td style="text-align:center;">${x.name}${x.withdrawn ? '(撤銷站)' : ''}</td><td>${f1(x.areaHa)}</td><td>${(x.weight * 100).toFixed(1)}%</td></tr>`).join('');
-    const fr = Object.values(d.freq24.results).map(r => `<tr style="${r.code === d.selectedCode ? 'font-weight:bold;background:#fef9c3;' : ''}"><td style="text-align:left;">${r.code === d.selectedCode ? '★ ' : ''}${r.name}</td><td>${r.chiSq.toFixed(2)}</td><td>${r.pass ? '通過' : '未通過'}</td><td>${r.rankW + r.rankH}</td>${T.map(t => `<td>${f1(r.quantiles[t])}</td>`).join('')}</tr>`).join('');
-    return `
-  <h3>${i + 4}、${pt.name}（${pt.type}）</h3>
-  <p>控制點 TWD97 (${tw.x}, ${tw.y})（${tw.lat}°N, ${tw.lon}°E），集水面積 ${f1(w.A_ha)} ha（${f2(w.A_km2)} km²），流路長 L = ${f1(w.L_m)} m，高程差 H = ${f1(w.H_m)} m，集流時間 t<sub>c</sub> = ${f2(w.Tc_hr)} hr（Rziha 公式），年平均雨量 ${f1(d.P_annual)} mm，年最大 24 小時樣本 ${d.sample24.length} 年。${d.basis ? '樣本推求：' + d.basis.methodNote : ''}</p>
-  ${mapImgs[i] ? `<div style="text-align:center;"><img src="${mapImgs[i]}" style="max-width:100%;border:1px solid #cbd5e1;" /><div class="caption">圖 ${i + 1} ${pt.name} 集水區與徐昇控制區位置圖</div></div>` : ''}
-  <div class="caption">表 ${i + 4}-1 ${pt.name} 採用雨量站與徐昇權重</div>
-  <table><thead><tr><th>站號</th><th>站名</th><th>徐昇面積 (ha)</th><th>權重</th></tr></thead><tbody>${stRows}</tbody></table>
-  <div class="caption">表 ${i + 4}-2 ${pt.name} 24 小時暴雨頻率分析成果（單位：mm；★為本點採用分布）</div>
-  <table><thead><tr><th>機率分布</th><th>卡方值</th><th>檢定</th><th>SE序位和</th>${th}</tr></thead><tbody>${fr}</tbody></table>
-  <div class="caption">表 ${i + 4}-3 ${pt.name} 各方法洪峰流量（單位：cms）</div>
-  <table><thead><tr><th>方法</th>${th}</tr></thead><tbody>
-    <tr style="${!isL ? 'font-weight:bold;' : ''}"><td style="text-align:center;">合理化公式 (合-無)</td>${d.rowRat.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
-    <tr style="${isL && d.uhMethod === 'TRI' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">修正三角型單位歷線 (△-同)</td>${d.rowTri.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
-    <tr style="${isL && d.uhMethod === 'SCS' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">SCS 無因次單位歷線 (S-同)</td>${d.rowScs.map(q => `<td>${f2(q)}</td>`).join('')}</tr></tbody></table>
-  <p>本點 A ${isL ? '≥' : '<'} 1,000 ha，設計洪峰採用<strong>${isL ? d.uhMethodLabel : '合理化公式'}</strong>：Q<sub>${d.targetT}</sub> = <strong>${f2(d.chosenClearQ)} cms</strong>。</p>`;
-  }).join('');
-  return `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>多控制點洪峰流量彙整報告</title>
-<style>
-body{font-family:"DFKai-SB","BiauKai","PMingLiU","Microsoft JhengHei",serif;color:#111;max-width:980px;margin:20px auto;padding:20px 40px;line-height:1.75}
+const CP_REPORT_CSS = `
+body{font-family:"DFKai-SB","BiauKai","PMingLiU","Microsoft JhengHei",serif;color:#111;max-width:1000px;margin:20px auto;padding:20px 40px;line-height:1.75}
 h1{text-align:center;font-size:22px;border-bottom:2px solid #000;padding-bottom:8px} h3{font-size:16px;margin-top:22px}
 p{text-indent:2em;margin:8px 0;text-align:justify} table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:12.5px}
 th,td{border:1px solid #000;padding:4px 6px;text-align:right} th{background:#f1f5f9;text-align:center} .caption{text-align:center;font-weight:bold;margin:14px 0 4px;font-size:14px}
 .toolbar{position:sticky;top:0;background:#1e293b;color:#fff;padding:10px 16px;border-radius:6px;display:flex;justify-content:space-between;margin-bottom:20px;font-family:sans-serif}
 .toolbar button{background:#0284c7;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:bold}
-@media print{.toolbar{display:none}body{margin:0;padding:10px}}
-</style></head><body>
+@media print{.toolbar{display:none}body{margin:0;padding:10px}}`;
+
+function multiPointReportHTML(pts, mapImgs) {
+  const f1 = v => v.toFixed(1), f2 = v => v.toFixed(2);
+  const d0 = pts[0].d, ci = d0.basis && d0.basis.convInfo, T = RETURN_PERIODS;
+  const th = `<th>${T.join('年</th><th>')}年</th>`;
+  const ordIdx = cpGroupOrder(pts).map(p => pts.indexOf(p));
+  const detail = ordIdx.map((i, k) => {
+    const pt = pts[i], d = pt.d, w = d.watershed, tw = w.outletTWD97, isL = w.A_ha >= 1000;
+    const stRows = d.thiessen.filter(x => x.checked).map(x => `<tr><td style="text-align:center;">${x.id}</td><td style="text-align:center;">${x.name}${x.withdrawn ? '(撤銷站)' : ''}</td><td>${f1(x.areaHa)}</td><td>${(x.weight * 100).toFixed(1)}%</td></tr>`).join('');
+    const fr = Object.values(d.freq24.results).map(r => `<tr style="${r.code === d.selectedCode ? 'font-weight:bold;background:#fef9c3;' : ''}"><td style="text-align:left;">${r.code === d.selectedCode ? '★ ' : ''}${r.name}</td><td>${r.chiSq.toFixed(2)}</td><td>${r.pass ? '通過' : '未通過'}</td><td>${r.rankW + r.rankH}</td>${T.map(t => `<td>${f1(r.quantiles[t])}</td>`).join('')}</tr>`).join('');
+    return `
+  <h3>附錄 ${k + 1}　${pt.name}（${pt.type}）</h3>
+  <p>控制點 TWD97 (${tw.x}, ${tw.y})（${tw.lat}°N, ${tw.lon}°E），集水面積 ${f1(w.A_ha)} ha（${f2(w.A_km2)} km²），流路長 L = ${f1(w.L_m)} m，高程差 H = ${f1(w.H_m)} m，集流時間 t<sub>c</sub> = ${f2(w.Tc_hr)} hr（Rziha 公式），年平均雨量 ${f1(d.P_annual)} mm，年最大 24 小時樣本 ${d.sample24.length} 年。${d.basis ? '樣本推求：' + d.basis.methodNote : ''}</p>
+  ${mapImgs[i] ? `<div style="text-align:center;"><img src="${mapImgs[i]}" style="max-width:100%;border:1px solid #cbd5e1;" /><div class="caption">圖 A-${k + 1} ${pt.name} 集水區與徐昇控制區位置圖</div></div>` : ''}
+  <div class="caption">表 A-${k + 1}-1 ${pt.name} 採用雨量站與徐昇權重</div>
+  <table><thead><tr><th>站號</th><th>站名</th><th>徐昇面積 (ha)</th><th>權重</th></tr></thead><tbody>${stRows}</tbody></table>
+  <div class="caption">表 A-${k + 1}-2 ${pt.name} 24 小時暴雨頻率分析成果（mm；★＝全流域統一採用之分布）</div>
+  <table><thead><tr><th>機率分布</th><th>卡方值</th><th>檢定</th><th>SE序位和</th>${th}</tr></thead><tbody>${fr}</tbody></table>
+  <div class="caption">表 A-${k + 1}-3 ${pt.name} 各方法洪峰流量（cms）</div>
+  <table><thead><tr><th>方法</th>${th}</tr></thead><tbody>
+    <tr style="${!isL ? 'font-weight:bold;' : ''}"><td style="text-align:center;">合理化公式 (合-無)</td>${d.rowRat.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
+    <tr style="${isL && d.uhMethod === 'TRI' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">修正三角型單位歷線 (△-同)</td>${d.rowTri.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
+    <tr style="${isL && d.uhMethod === 'SCS' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">SCS 無因次單位歷線 (S-同)</td>${d.rowScs.map(q => `<td>${f2(q)}</td>`).join('')}</tr></tbody></table>`;
+  }).join('');
+  const sharedTxt = cpSharedText(pts);
+  return `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>多控制點洪峰流量彙整報告</title><style>${CP_REPORT_CSS}</style></head><body>
 <div class="toolbar"><span>📄 <strong>多控制點洪峰流量彙整報告</strong>（${pts.length} 點）</span><button onclick="window.print()">🖨️ 列印 / 另存 PDF</button></div>
 <h1>多控制點洪峰流量彙整報告</h1>
 <h3>一、分析範圍與方法</h3>
-<p>本報告於主流及支流上手動選定 ${pts.length} 個控制點，各控制點依 DEM 自動回溯劃設集水區，並各自以選用雨量站之徐昇面積權重、CODiS 雨量資料進行最大 24 小時暴雨頻率分析（LN2、LN3、PT3、LP3、EV1 五種分布，卡方檢定與標準誤差擇優），推求設計雨量與洪峰流量。集水面積小於 1,000 ha 者採合理化公式配合無因次降雨強度，大於或等於 1,000 ha 者採${d0.uhMethodLabel}配合同位序雨型。</p>
+<p>本報告於主流及支流上手動選定 ${pts.length} 個控制點，各控制點依 DEM 自動回溯劃設集水區，並各自以選用雨量站之徐昇面積權重、CODiS 雨量資料進行最大 24 小時暴雨頻率分析（LN2、LN3、PT3、LP3、EV1 五種分布，卡方檢定與標準誤差評估），推求設計雨量與洪峰流量。為使全流域一致，<strong>各控制點採用同一機率分布，並共用同一雨型</strong>。集水面積小於 1,000 ha 者採合理化公式配合無因次降雨強度，大於或等於 1,000 ha 者採${d0.uhMethodLabel}配合同位序雨型。</p>
+${sharedTxt ? `<p>${sharedTxt}</p>` : ''}
 <p><strong>注意：各控制點之洪峰流量均為各點集水區獨立計算之結果，未進行歷線匯流演算（支流匯入主流處之歷線疊加、洪峰衰減與時間差未予考慮），故各點洪峰不可直接相加或相減。</strong>如需支流匯入後之主流設計流量，須另以歷線演算。</p>
 <h3>二、共同計算參數</h3>
-<p>逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量 = C × 降雨'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。</p>
-<h3>三、控制點洪峰流量彙整</h3>
-<div class="caption">表 1 各控制點基本資料及設計洪峰流量彙整表（單位：cms，採用方法之清水流洪峰）</div>
-<table><thead><tr><th>編號</th><th>控制點</th><th>類型</th><th>TWD97<br>X / Y</th><th>A (ha)</th><th>L (m)</th><th>H (m)</th><th>t<sub>c</sub> (hr)</th><th>採用方法</th>${th}</tr></thead><tbody>${sumRows}</tbody></table>
-<div class="caption">表 2 各控制點設計 24 小時暴雨量（單位：mm）</div>
-<table><thead><tr><th>控制點</th><th>樣本年數</th><th>採用分布</th>${th}</tr></thead><tbody>${rainRows}</tbody></table>
-<div class="caption">表 3 各控制點含砂水流${pts.some(p => p.d.dfMetrics && p.d.dfMetrics.isDebris) ? '及土石流' : ''}尖峰流量（單位：cms）</div>
-<table><thead><tr><th>控制點</th><th>類別</th>${th}</tr></thead><tbody>${sedRows}</tbody></table>
+<p>逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量 = C × 降雨'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+α)；土石流 Q<sub>d</sub> = Q<sub>p</sub>/(1−C<sub>d</sub>)，僅於判定為土石流潛勢溪流之控制點列出。</p>
+<h3>三、控制點成果合併表</h3>
+${cpMergedHTML(pts, false)}
 ${detail}
 </body></html>`;
 }
@@ -3940,6 +4038,12 @@ document.getElementById('btnCpReport').addEventListener('click', async () => {
   const win = window.open("", "_blank");
   win.document.write(html); win.document.close();
   setStatus(`✅ 多控制點洪峰彙整報告已開啟於新分頁（${pts.length} 點）。`);
+});
+document.getElementById('btnCpPop').addEventListener('click', () => {
+  const pts = cpRows(); if (!pts.length) return;
+  const win = window.open("", "_blank");
+  win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>控制點成果合併表</title><style>${CP_REPORT_CSS}</style></head><body><h1>控制點成果合併表</h1><p>${cpSharedText(pts)}</p>${cpMergedHTML(pts, false)}</body></html>`);
+  win.document.close();
 });
 renderControlPointList();
 
