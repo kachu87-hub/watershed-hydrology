@@ -22,8 +22,7 @@
     body { margin: 0; display: flex; height: 100vh; background: #0f172a; color: #f8fafc; overflow: hidden; }
     #leftPanel { width: 640px; min-width: 380px; max-width: 85vw; flex: none; height: 100vh; overflow-y: auto; padding: 14px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; gap: 10px; }
     #rightPanel { flex: 1; display: flex; flex-direction: column; height: 100vh; }
-    #map { flex: 1; min-height: 15%; background: #090d16; cursor: crosshair; }
-    #bottomDrawer { height: 50%; background: #0f172a; border-top: 2px solid #334155; padding: 10px 14px; overflow-y: auto; display: flex; gap: 14px; }
+    #map { flex: 1; min-height: 100%; background: #090d16; cursor: crosshair; }
     .drawer-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; }
     .card h3 { margin: 0 0 8px 0; font-size: 15.5px; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 5px; }
@@ -68,8 +67,6 @@
     .tabpane.active { display: flex; }
     #vSplit { width: 7px; flex: none; cursor: col-resize; background: #334155; }
     #vSplit:hover { background: #38bdf8; }
-    #hSplit { height: 7px; flex: none; cursor: row-resize; background: #334155; }
-    #hSplit:hover { background: #38bdf8; }
     /* 以屬性選擇器放大面板內以 inline style 指定之小字（僅限左側面板與成果區，不影響報告視窗） */
     #leftPanel [style*="font-size:10"], #leftPanel [style*="font-size: 10"], #leftPanel [style*="font-size:11"], #leftPanel [style*="font-size: 11"],
     #bottomDrawer [style*="font-size:10"], #bottomDrawer [style*="font-size: 10"], #bottomDrawer [style*="font-size:11"], #bottomDrawer [style*="font-size: 11"] { font-size: 13px !important; }
@@ -234,6 +231,33 @@
       <div id="stationFreqBody" style="overflow:auto; margin-top:4px;"></div>
     </details>
       </div>
+  <div class="card">
+    <h3><span>📊 頻率分析成果（卡方檢定 k=7 與誤差指標）</span></h3>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong style="font-size:13.5px; color:#cbd5e1;">各分布比較（自動計算，隨資料與設定即時更新）</strong>
+        <button id="btnExportCSV" class="secondary" style="width:auto; padding:3px 10px; margin:0;">下載 CSV 計算書</button>
+      </div>
+      <div style="overflow-x:auto; margin-top:4px;">
+        <table>
+          <thead>
+            <tr>
+              <th>機率分布 (參數 r)</th>
+              <th>卡方分析值 &chi;<sup>2</sup></th>
+              <th>理論臨界值 (&alpha;=0.05)</th>
+              <th>通過檢定</th>
+              <th>Weibull SE</th>
+              <th>Hazen SE</th>
+              <th>T 年 24hr 雨量</th>
+            </tr>
+          </thead>
+          <tbody id="freqTableBody">
+            <tr><td colspan="7" style="text-align:center;">請在地圖點選控制點以執行水文頻率分析</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+        
+  </div>
 </div>
 <div class="tabpane" id="pane_t4">
   <div class="card">
@@ -385,19 +409,47 @@
 
   </div>
 
+    <div class="card">
+    <h3><span>📋 洪峰流量成果與歷線</span></h3>
+    <div style="margin-top:8px; font-size:12px; font-weight:bold; color:#38bdf8;">
+          📋 不同重現期距洪峰流量分析成果表（合理化公式、修正三角型歷線、含砂水流與土石流流量）
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>分析方法 / 重現期</th>
+              <th>2年</th>
+              <th>5年</th>
+              <th>10年</th>
+              <th>25年</th>
+              <th>50年 (設計)</th>
+              <th>100年</th>
+              <th>200年</th>
+            </tr>
+          </thead>
+          <tbody id="peakSummaryBody">
+            <tr><td colspan="8" style="text-align:center;">點選控制點後自動產出各重現期洪峰流量對照表</td></tr>
+          </tbody>
+        </table>
+    <div id="hydroResultSummary" style="font-size:12px; color:#f8fafc; margin-bottom:4px; font-weight:bold; line-height:1.4;">
+        🌊 洪水與土石流歷線圖（上方有效雨量柱與下方流量歷線分離不重疊）
+      </div>
+      <div style="height:340px; position:relative; background:#1e293b; border-radius:6px; padding:6px;">
+        <canvas id="hydroChart"></canvas>
+      </div>
   </div>
+</div>
 <div class="tabpane" id="pane_t5">
   <div class="card">
     <h3><span>⑤ 成果與報告</span></h3>
     <div style="font-size:13.5px; color:#cbd5e1; line-height:1.6; margin-bottom:8px;">
-      各重現期洪峰流量表、頻率分析表與洪水歷線圖顯示於畫面右下方「成果區」；成果區可用下方按鈕放大，亦可拖曳地圖與成果區之間的橫條調整高度、拖曳左側面板右緣調整寬度。
+      頻率分析成果表顯示於「③ 頻率分析」，各重現期洪峰流量表與洪水歷線圖顯示於「④ 雨型與歷線」，皆自動計算，參數一改即更新；可拖曳左側面板右緣調整寬度。
     </div>
     <div class="grid-2">
       <button id="btnRunHydrology" class="success" style="margin-bottom:0;">重新執行水文與土石流演算</button>
       <button id="btnGenerateReport" class="report-btn" style="margin-bottom:0;">📄 產出完整水文與土砂分析報告</button>
     </div>
     <div class="grid-2" style="margin-top:8px;">
-      <button id="btnToggleDrawer" class="secondary" style="margin-bottom:0;">⛶ 放大／還原成果區</button>
       <button id="btnExportCSV2" class="secondary" style="margin-bottom:0;">下載 CSV 計算書</button>
     </div>
   </div>
@@ -434,63 +486,6 @@
 <!-- 右側地圖與底部水文報告表格 -->
 <div id="rightPanel">
   <div id="map"></div>
-  <div id="hSplit" title="拖曳調整成果區高度"></div>
-  <div id="bottomDrawer">
-    <div class="drawer-col" style="flex: 1.25;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <strong style="font-size:12.5px; color:#38bdf8;">📊 24hr 暴雨頻率分析、卡方檢定 (k=7) 與誤差指標比較表</strong>
-        <button id="btnExportCSV" class="secondary" style="width:auto; padding:3px 10px; margin:0;">下載 CSV 計算書</button>
-      </div>
-      <div style="overflow-y:auto; flex:1; margin-top:4px;">
-        <table>
-          <thead>
-            <tr>
-              <th>機率分布 (參數 r)</th>
-              <th>卡方分析值 &chi;<sup>2</sup></th>
-              <th>理論臨界值 (&alpha;=0.05)</th>
-              <th>通過檢定</th>
-              <th>Weibull SE</th>
-              <th>Hazen SE</th>
-              <th>T 年 24hr 雨量</th>
-            </tr>
-          </thead>
-          <tbody id="freqTableBody">
-            <tr><td colspan="7" style="text-align:center;">請在地圖點選控制點以執行水文頻率分析</td></tr>
-          </tbody>
-        </table>
-
-        <div style="margin-top:8px; font-size:12px; font-weight:bold; color:#38bdf8;">
-          📋 不同重現期距洪峰流量分析成果表（合理化公式、修正三角型歷線、含砂水流與土石流流量）
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>分析方法 / 重現期</th>
-              <th>2年</th>
-              <th>5年</th>
-              <th>10年</th>
-              <th>25年</th>
-              <th>50年 (設計)</th>
-              <th>100年</th>
-              <th>200年</th>
-            </tr>
-          </thead>
-          <tbody id="peakSummaryBody">
-            <tr><td colspan="8" style="text-align:center;">點選控制點後自動產出各重現期洪峰流量對照表</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="drawer-col" style="flex: 1;">
-      <div id="hydroResultSummary" style="font-size:12px; color:#f8fafc; margin-bottom:4px; font-weight:bold; line-height:1.4;">
-        🌊 洪水與土石流歷線圖（上方有效雨量柱與下方流量歷線分離不重疊）
-      </div>
-      <div style="flex:1; position:relative; background:#1e293b; border-radius:6px; padding:6px;">
-        <canvas id="hydroChart"></canvas>
-      </div>
-    </div>
-  </div>
 </div>
 
 <script>
@@ -4807,29 +4802,23 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
     document.querySelectorAll('#tabBar button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     const lp = document.getElementById('leftPanel'); if (lp) lp.scrollTop = 0;
     try { localStorage.setItem('wsTab', id); } catch (e) { }
+    if (id === 't3' || id === 't4' || id === 't5') { try { runFrequencyAndHydrology(); } catch (e) { } }
   };
   window.showWsTab = showTab;
   document.getElementById('tabBar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) showTab(b.dataset.tab); });
   try { const t = localStorage.getItem('wsTab'); if (t && document.getElementById('pane_' + t)) showTab(t); } catch (e) { }
 
   const lp = document.getElementById('leftPanel'), vs = document.getElementById('vSplit'), rp = document.getElementById('rightPanel');
-  const dr = document.getElementById('bottomDrawer'), hs = document.getElementById('hSplit');
   const fixMap = () => { try { map.invalidateSize(); } catch (e) { } };
   try { const w = parseInt(localStorage.getItem('wsLeftW')); if (w >= 380) lp.style.width = w + 'px'; } catch (e) { }
   let mode = null;
   vs.addEventListener('pointerdown', (e) => { mode = 'v'; vs.setPointerCapture(e.pointerId); e.preventDefault(); });
-  hs.addEventListener('pointerdown', (e) => { mode = 'h'; hs.setPointerCapture(e.pointerId); e.preventDefault(); });
   window.addEventListener('pointermove', (e) => {
     if (mode === 'v') lp.style.width = Math.min(window.innerWidth * 0.85, Math.max(380, e.clientX)) + 'px';
-    else if (mode === 'h') { const r = rp.getBoundingClientRect(); dr.style.height = Math.min(r.height - 120, Math.max(120, r.bottom - e.clientY)) + 'px'; }
   });
   window.addEventListener('pointerup', () => {
     if (mode === 'v') { try { localStorage.setItem('wsLeftW', parseInt(lp.style.width)); } catch (e) { } }
     if (mode) { mode = null; fixMap(); }
-  });
-  document.getElementById('btnToggleDrawer').addEventListener('click', () => {
-    const big = dr.dataset.big === '1'; dr.dataset.big = big ? '0' : '1';
-    dr.style.height = big ? '50%' : '80%'; fixMap();
   });
   document.getElementById('btnExportCSV2').addEventListener('click', () => document.getElementById('btnExportCSV').click());
 })();
