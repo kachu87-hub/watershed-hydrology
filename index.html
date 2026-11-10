@@ -3542,9 +3542,11 @@ function runFrequencyAndHydrology() {
   syncActiveControlPoint();
 }
 
-function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics) {
-  const ctx = document.getElementById('hydroChart').getContext('2d');
-  if (chartInstance) chartInstance.destroy();
+// off = true：於畫面外之固定尺寸畫布重繪並回傳 PNG（供報告使用，不受目前分頁是否隱藏影響）
+function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics, off) {
+  let offCvs = null, ctx;
+  if (off) { offCvs = document.createElement('canvas'); offCvs.width = 920; offCvs.height = 420; ctx = offCvs.getContext('2d'); }
+  else { ctx = document.getElementById('hydroChart').getContext('2d'); if (chartInstance) chartInstance.destroy(); }
 
   const debrisQSeries = uhResult.Q.map(q => +(q / (1.0 - dfMetrics.Cd)).toFixed(2));
   const highestFlow = dfMetrics.isDebris ? Math.max(...debrisQSeries, 10) : Math.max(...uhResult.Q, 10);
@@ -3587,11 +3589,14 @@ function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics) {
     yAxisID: 'y1'
   });
 
-  chartInstance = new Chart(ctx, {
+  const chart = new Chart(ctx, {
     type: 'line',
     data: { labels: uhResult.timeAxis, datasets },
+    plugins: off ? [{ id: 'bg', beforeDraw: (c) => { c.ctx.save(); c.ctx.globalCompositeOperation = 'destination-over'; c.ctx.fillStyle = '#0f172a'; c.ctx.fillRect(0, 0, c.width, c.height); c.ctx.restore(); } }] : [],
     options: {
-      responsive: true,
+      responsive: !off,
+      animation: off ? false : undefined,
+      devicePixelRatio: off ? 1 : undefined,
       maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#cbd5e1', font: { size: 11 } } } },
       scales: {
@@ -3615,6 +3620,8 @@ function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics) {
       }
     }
   });
+  if (off) { const url = offCvs.toDataURL('image/png'); chart.destroy(); return url; }
+  chartInstance = chart;
 }
 
 // ============================================================================
@@ -3974,8 +3981,8 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   // 擷取/生成報告所需的等高線地形圖與歷線圖片
   const mapImgUrl = await renderWatershedMapImageForReport(d);
   const stormImgUrl = renderStormPatternImageForReport(d.stormPattern24, d.targetT);
-  const hydroChartCanvas = document.getElementById('hydroChart');
-  const hydroImgUrl = hydroChartCanvas ? hydroChartCanvas.toDataURL("image/png") : "";
+  let hydroImgUrl = "";
+  try { hydroImgUrl = renderNonOverlappingHydroChart(d.targetUhRes, d.targetT, d.dfMetrics, true); } catch (e) { console.error(e); }
   setStatus("✅ 集水區水文、水理及土砂分析報告已開啟於新分頁！");
 
   const halfLen = Math.ceil(d.amsYears.length / 2);
@@ -4803,6 +4810,7 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
     const lp = document.getElementById('leftPanel'); if (lp) lp.scrollTop = 0;
     try { localStorage.setItem('wsTab', id); } catch (e) { }
     if (id === 't3' || id === 't4' || id === 't5') { try { runFrequencyAndHydrology(); } catch (e) { } }
+    if (id === 't4') { try { if (chartInstance) chartInstance.resize(); } catch (e) { } }
   };
   window.showWsTab = showTab;
   document.getElementById('tabBar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) showTab(b.dataset.tab); });
