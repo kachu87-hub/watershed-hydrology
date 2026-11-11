@@ -135,10 +135,10 @@
       <input type="checkbox" id="chkWraStations" checked style="width:auto; margin:0;" /> 顯示並列入水利署雨量站（紫色點，219 站，含台電站；114 年水文年報站籍）
     </label>
     <div style="font-size:11px; color:#94a3b8; line-height:1.5; margin:-2px 0 6px 0;">
-      水利署站僅列入站位與站號，目前尚無雨量資料匯入功能，故列於下表時預設不勾選、不參與徐昇分割與頻率分析。
+      水利署站可上傳「水利署年報轉出之 Excel」（工作表：逐月日資料、年統計、測站資料；與 CODiS 檔可同時選取）。未上傳資料的水利署站列於下表時預設不勾選；上傳後自動勾選並參與徐昇分割與頻率分析（僅有日資料，不參與雨型）。
     </div>
     <div class="upload-slot" style="border-color:#38bdf8;">
-      <label style="color:#38bdf8; font-weight:bold;">📥 批次上傳雨量站 Excel（同一站可同時選取「日資料.xlsx」與「時資料.xlsx」自動合併）</label>
+      <label style="color:#38bdf8; font-weight:bold;">📥 批次上傳雨量站 Excel（CODiS：同一站可同時選取「日資料」與「時資料」自動合併；水利署：年報轉出之逐月日資料檔）</label>
       <input type="file" id="batchCodisUpload" accept=".xlsx,.xls" multiple style="margin-bottom:2px;" />
       <div style="font-size:11px; color:#94a3b8;">
         • <strong>勾選/取消採用雨量站</strong>：系統會以「目前勾選之雨量站」<strong>即時重新切割徐昇多邊形</strong>，使選用站面積總和 = 100%，地圖與報告圖面同步更新！
@@ -194,6 +194,7 @@
         <div style="grid-column: span 2;"><label>單時雨量上限 (mm/hr)</label><input type="number" id="input_maxHr" value="200" min="50" max="500" step="10" /></div>
       </div>
       <div style="font-size:11px; color:#94a3b8; line-height:1.5;">補遺參考站僅限已勾選之 CODiS 站（比值法）；年最大 24hr 以 Bulletin 17B 檢定離群值（n ≥ 10），高、低離群值預設剔除，可於結果表逐年改為保留。</div>
+      <div id="wraQcPanel"></div>
       <div id="cleanPanel"></div>
     </div>
     <div id="rainBasisPanel" style="font-size:11.5px; margin-top:6px; line-height:1.5;">雨量樣本與雨型說明：上傳雨量 Excel 並完成控制點後顯示</div>
@@ -1307,7 +1308,7 @@ function renderStationMarkers() {
       if (!wraEnabled()) return;
       L.circleMarker([st.lat, st.lon], {
         radius: hasLoaded ? 7 : 5, fillColor: hasLoaded ? "#22c55e" : "#a855f7", color: "#1e1b4b", weight: 2, fillOpacity: 0.95
-      }).bindTooltip(`【${st.org === '台灣電力公司' ? '台電' : '水利署'}】${st.name} (${st.id})<br>${st.basin} · ${st.county || ''} · 高程: ${st.elev}m<br>TWD97: ${st.twdX}, ${st.twdY}<br>紀錄年份: ${st.period}<br>${hasLoaded ? '✔ 已有雨量資料' : '雨量資料尚無匯入功能（站位已列入）'}`).addTo(layerStations);
+      }).bindTooltip(`【${st.org === '台灣電力公司' ? '台電' : '水利署'}】${st.name} (${st.id})<br>${st.basin} · ${st.county || ''} · 高程: ${st.elev}m<br>TWD97: ${st.twdX}, ${st.twdY}<br>紀錄年份: ${st.period}<br>${hasLoaded ? '✔ 已有雨量資料' : '可上傳水利署年報轉出之 Excel（逐月日資料）'}`).addTo(layerStations);
       return;
     }
     L.circleMarker([st.lat, st.lon], {
@@ -2377,6 +2378,121 @@ function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fil
   return { stId: dbKey, stName: stMeta.name || dbKey };
 }
 
+
+// ---- 水利署水文年報轉出之 Excel（逐月日資料橫式表）----
+// 工作表：「逐月日資料(mm)」（年、月、1日…31日、…、月雨量）、「年統計」、「測站資料」（站號/站名/流域/標高…）。'-' 視為 0，'*' 或空白視為缺測。
+function isWraYearbookWorkbook(wb) { return wb.SheetNames.some(n => n.indexOf('逐月日資料') === 0); }
+function wraNumCell(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  const t = String(v).trim();
+  if (t === '' || t === '*' || t === '＊') return null;
+  if (t === '-' || t === '－' || t === '—') return 0;
+  const n = parseFloat(t.replace(/[,@\s]/g, '')); return isFinite(n) ? n : null;
+}
+function parseWraYearbookWorkbook(wb) {
+  const sh = wb.SheetNames.find(n => n.indexOf('逐月日資料') === 0);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[sh], { header: 1, raw: true });
+  const hdr = (rows[0] || []).map(h => String(h || '').trim());
+  const cY = hdr.indexOf('年'), cM = hdr.indexOf('月');
+  const cD1 = hdr.findIndex(h => /^1日$/.test(h));
+  const cSum = hdr.findIndex(h => h === '月雨量');
+  if (cY < 0 || cM < 0 || cD1 < 0) throw new Error('逐月日資料表頭需含「年」「月」「1日…31日」');
+  const meta = {};
+  if (wb.SheetNames.includes('測站資料')) XLSX.utils.sheet_to_json(wb.Sheets['測站資料'], { header: 1, raw: true }).forEach(r => { if (r && r.length >= 2 && r[0] != null) meta[String(r[0]).trim()] = r[1]; });
+  const stat = {};
+  if (wb.SheetNames.includes('年統計')) {
+    const sr = XLSX.utils.sheet_to_json(wb.Sheets['年統計'], { header: 1, raw: true });
+    const sh0 = (sr[0] || []).map(h => String(h || '').trim());
+    const iA = sh0.findIndex(h => h.indexOf('年雨量') === 0), iM = sh0.findIndex(h => h.indexOf('一日最大(') === 0 || h === '一日最大(mm)');
+    sr.slice(1).forEach(r => { if (r && r[0]) stat[+r[0]] = { annual: iA >= 0 ? wraNumCell(r[iA]) : null, max1: iM >= 0 ? wraNumCell(r[iM]) : null }; });
+  }
+  const raw = {}, mon = {}, blanks = {}, sumMis = {};
+  rows.slice(1).forEach(r => {
+    if (!r || !r[cY] || !r[cM]) return;
+    const y = +r[cY], m = +r[cM]; if (!y || !m || m > 12) return;
+    const nd = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    (mon[y] = mon[y] || new Set()).add(m);
+    let sum = 0;
+    for (let d = 1; d <= nd; d++) {
+      const v = wraNumCell(r[cD1 + d - 1]);
+      if (v === null) { blanks[y] = (blanks[y] || 0) + 1; continue; }
+      (raw[y] = raw[y] || {})[`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`] = v; sum += v;
+    }
+    const ms = cSum >= 0 ? wraNumCell(r[cSum]) : null;
+    if (ms !== null && Math.abs(ms - sum) > 0.6) (sumMis[y] = sumMis[y] || []).push({ m, calc: +sum.toFixed(1), book: ms });
+  });
+  const qc = Object.keys(mon).map(Number).sort((a, b) => a - b).map(y => {
+    const days = raw[y] || {}, vals = Object.values(days);
+    const mx = vals.length ? Math.max(...vals) : 0, tot = vals.reduce((a, b) => a + b, 0);
+    const reasons = []; let bad = false;
+    if (mon[y].size < 12) { reasons.push(`僅 ${mon[y].size} 個月有資料（缺 ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].filter(x => !mon[y].has(x)).join('、')} 月）`); bad = true; }
+    if (blanks[y]) { reasons.push(`缺測 ${blanks[y]} 日`); bad = true; }
+    (sumMis[y] || []).forEach(o => { const diff = Math.abs(o.book - o.calc); reasons.push(`${o.m} 月日加總 ${o.calc} ≠ 月雨量 ${o.book}`); if (diff > 5) bad = true; });
+    const st = stat[y];
+    if (st && st.max1 != null && Math.abs(st.max1 - mx) > 0.6) { reasons.push(`日資料年最大 ${mx} ≠ 年統計一日最大 ${st.max1}`); bad = true; }
+    return { year: y, total: +tot.toFixed(1), max1: mx, status: bad ? 'bad' : (reasons.length ? 'warn' : 'ok'), reasons, adopt: !bad };
+  });
+  return { meta, raw, qc };
+}
+// 依各年「採用」勾選重建該站日雨量、年最大與年雨量
+function applyWraAdoption(db) {
+  const dm = {}, ams = {}, ann = {}; let n = 0, sum = 0;
+  (db.wraQC || []).forEach(q => {
+    if (!q.adopt) return;
+    const days = db.wraRaw[q.year] || {};
+    Object.assign(dm, days);
+    ams[q.year] = +q.max1.toFixed(1); ann[q.year] = q.total; sum += q.total; n++;
+  });
+  db.dailyByDate = dm; db.ams24ByYear = ams; db.annualPByYear = ann;
+  db.hasDaily = n > 0; db.dailyDerived = false;
+  db.dailyLabel = `日資料(${n}年；水利署年報)`;
+  if (n > 0) db.meanAnnualP = +(sum / n).toFixed(1);
+  rainDataVersion++;
+}
+function importWraYearbook(wb, fileName) {
+  const p = parseWraYearbookWorkbook(wb);
+  const idRaw = String(p.meta['站號'] || '').trim(), nmRaw = String(p.meta['站名'] || '').trim().replace(/雨量站|站$/g, '');
+  const wraAll = ALL_STATIONS.filter(isWraStation);
+  let st = wraAll.find(s => s.id === idRaw) || null, note = '';
+  if (!st) {
+    const alt = parseFloat(String(p.meta['標高(m)'] || '').replace(/,/g, ''));
+    const cand = wraAll.filter(s => (nmRaw && s.name.replace(/\(\d+\)$/, '') === nmRaw) || (isFinite(alt) && s.elev === alt && idRaw.slice(0, 4) === s.id.slice(0, 4)));
+    const dflt = cand.length ? cand[0].id : '';
+    const ans = window.prompt(`檔案「${fileName}」之站號 ${idRaw || '(無)'}／站名 ${nmRaw || '(無)'} 不在水利署站籍表（114 年水文年報附錄）。\n請輸入此檔所屬之站號（例如 ${dflt || '1140P001'}），取消則略過此檔：` + (cand.length ? `\n可能的站：${cand.map(c => c.name + ' ' + c.id).join('、')}` : ''), dflt);
+    if (!ans) return { skipped: true, name: nmRaw || idRaw || fileName };
+    st = wraAll.find(s => s.id === ans.trim());
+    if (!st) return { skipped: true, name: ans.trim() + '（站號不在站籍表）' };
+    note = `檔內站號 ${idRaw} 與站籍不符，已依使用者指定改為 ${st.id}`;
+  }
+  const db = stationRainDB[st.id] || { stName: st.name, hasDaily: false, hasHourly: false, dailyLabel: '未上傳', hourlyLabel: '預設同位序', meanAnnualP: 3000, annualPByYear: {}, ams24ByYear: {}, stormPattern24: [...DEFAULT_SAME_RANK_PCT_24HR] };
+  db.stName = st.name; db.wraRaw = p.raw; db.wraQC = p.qc; db.wraNote = note; db.wraFile = fileName; db.wraFileId = idRaw;
+  applyWraAdoption(db);
+  stationRainDB[st.id] = db;
+  return { st, nOk: p.qc.filter(q => q.adopt).length, nAll: p.qc.length, note };
+}
+function renderWraQcPanel() {
+  const box = document.getElementById('wraQcPanel'); if (!box) return;
+  const ids = Object.keys(stationRainDB).filter(id => stationRainDB[id].wraQC);
+  if (!ids.length) { box.innerHTML = ''; return; }
+  box.innerHTML = ids.map(id => {
+    const db = stationRainDB[id], st = ALL_STATIONS.find(s => s.id === id);
+    const color = { ok: '#4ade80', warn: '#fbbf24', bad: '#f87171' }, label = { ok: '正常', warn: '輕微差異', bad: '有疑點' };
+    return `<details style="border:1px solid #334155; border-radius:6px; padding:6px; margin:6px 0;" open>
+      <summary style="cursor:pointer; color:#d8b4fe; font-size:13.5px;">水利署年報檔：${st ? st.name : db.stName}（${id}）${db.wraNote ? '；' + db.wraNote : ''}　採用 ${db.wraQC.filter(q => q.adopt).length}／${db.wraQC.length} 年</summary>
+      <div style="font-size:12px; color:#94a3b8; line-height:1.5; margin:4px 0;">檢查項目：月內缺測日、日加總與月雨量、日資料年最大與年統計一日最大。缺測年或年最大不一致者預設不採用，可自行勾選。</div>
+      <table><thead><tr><th>年</th><th>年雨量</th><th>日資料年最大</th><th>檢查</th><th>採用</th></tr></thead><tbody>
+      ${db.wraQC.map(q => `<tr><td style="text-align:center;">${q.year}</td><td>${q.total}</td><td>${q.max1}</td><td style="text-align:left; color:${color[q.status]};">${label[q.status]}${q.reasons.length ? '：' + q.reasons.join('；') : ''}</td><td style="text-align:center;"><input type="checkbox" class="wra-adopt" data-sid="${id}" data-year="${q.year}" ${q.adopt ? 'checked' : ''} style="width:auto; margin:0;" /></td></tr>`).join('')}
+      </tbody></table></details>`;
+  }).join('');
+}
+document.addEventListener('change', (e) => {
+  const t = e.target; if (!t || !t.classList || !t.classList.contains('wra-adopt')) return;
+  const db = stationRainDB[t.dataset.sid]; if (!db) return;
+  const q = db.wraQC.find(x => x.year === +t.dataset.year); if (!q) return;
+  q.adopt = t.checked; applyWraAdoption(db); renderWraQcPanel(); renderStationMarkers(); refreshThiessenUI(); runFrequencyAndHydrology();
+});
+
 document.getElementById('batchCodisUpload').addEventListener('change', async (e) => {
   const files = Array.from(e.target.files);
   if (!files.length) return;
@@ -2386,6 +2502,14 @@ document.getElementById('batchCodisUpload').addEventListener('change', async (e)
     await new Promise(r => setTimeout(r, 20));
     try {
       const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+      if (isWraYearbookWorkbook(wb)) {
+        const w = importWraYearbook(wb, file.name);
+        if (w.skipped) { logs.push(`${w.name}（已略過）`); continue; }
+        logs.push(`${w.st.name}（水利署，採用 ${w.nOk}/${w.nAll} 年）`);
+        const inList = currentThiessenList.find(x => x.id === w.st.id);
+        if (inList && stationHasData(w.st)) inList.checked = true;
+        continue;
+      }
       const res = parseAndMergeCodisExcel(wb, null, null, file.name);
       logs.push(`${res.stName}`);
     } catch (err) {
@@ -2394,7 +2518,9 @@ document.getElementById('batchCodisUpload').addEventListener('change', async (e)
     }
   }
   renderStationMarkers();
+  if (currentWatershedParams && currentWatershedParams.feature && currentThiessenList.some(x => x.src === 'WRA' && x.checked && x.areaHa === 0)) recomputeActiveVoronoi();
   refreshThiessenUI();
+  renderWraQcPanel();
   runFrequencyAndHydrology();
   if (!hasMissingActiveStations()) setStatus(`✅ 成功載入並合併雨量站資料：<strong>${logs.join("、")}</strong>！`);
 });
