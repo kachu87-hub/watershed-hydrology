@@ -4060,6 +4060,83 @@ function runFrequencyAndHydrology() {
 }
 
 // off = true：於畫面外之固定尺寸畫布重繪並回傳 PNG（供報告使用，不受目前分頁是否隱藏影響）
+// 報告用歷線圖：不依賴 Chart.js 與畫面上的圖表，直接以 canvas 2D 繪製（白底），回傳 PNG dataURL
+function drawHydroReportImage(uhResult, targetT, dfMetrics) {
+  const W = 920, H = 440, L = 72, R = 72, T = 56, B = 58;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+  const n = uhResult.Q.length;
+  const xs = uhResult.timeAxis.map((t, i) => { const v = parseFloat(t); return isFinite(v) ? v : i; });
+  const x0 = xs[0], x1 = xs[n - 1] > x0 ? xs[n - 1] : x0 + 1;
+  const pw = W - L - R, ph = H - T - B;
+  const X = v => L + (v - x0) / (x1 - x0) * pw;
+  const Qd = dfMetrics && dfMetrics.isDebris ? uhResult.Q.map(q => q / (1.0 - dfMetrics.Cd)) : null;
+  const qMax0 = Math.max(...uhResult.Q, ...(Qd || []), 10);
+  const niceMax = v => { const e = Math.pow(10, Math.floor(Math.log10(v))); const m = v / e; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * e; };
+  const qMax = niceMax(qMax0 * 1.48);
+  const peMax0 = Math.max(...uhResult.Pe_bar, 1), peMax = niceMax(peMax0 * 4.6);
+  const YQ = q => T + ph - q / qMax * ph;
+  const YP = p => T + p / peMax * ph;   // 有效雨量由上往下
+  // 格線與座標軸
+  g.font = '12px "Microsoft JhengHei","Noto Sans CJK TC",sans-serif';
+  g.textBaseline = 'middle';
+  g.strokeStyle = '#e2e8f0'; g.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = T + ph - i * ph / 5;
+    g.beginPath(); g.moveTo(L, y); g.lineTo(L + pw, y); g.stroke();
+    g.fillStyle = '#0369a1'; g.textAlign = 'right'; g.fillText((qMax * i / 5).toFixed(qMax < 10 ? 1 : 0), L - 6, y);
+    const yp = T + i * ph / 5;
+    g.fillStyle = '#b45309'; g.textAlign = 'left'; g.fillText((peMax * i / 5).toFixed(peMax < 10 ? 1 : 0), L + pw + 6, yp);
+  }
+  const nx = Math.min(12, Math.max(4, Math.round((x1 - x0) / 3)));
+  const stepX = niceMax((x1 - x0) / nx);
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  for (let v = Math.ceil(x0 / stepX) * stepX; v <= x1 + 1e-9; v += stepX) {
+    const x = X(v);
+    g.strokeStyle = '#f1f5f9'; g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke();
+    g.fillStyle = '#334155'; g.fillText(String(+v.toFixed(2)), x, T + ph + 6);
+  }
+  g.strokeStyle = '#334155'; g.lineWidth = 1.2; g.strokeRect(L, T, pw, ph);
+  // 有效雨量柱（由上往下）
+  const bw = Math.max(1, pw / n * 0.8);
+  g.fillStyle = 'rgba(245,158,11,0.85)';
+  uhResult.Pe_bar.forEach((p, i) => { if (p > 0) g.fillRect(X(xs[i]) - bw / 2, T, bw, YP(p) - T); });
+  // 清水流量（含面積填色）
+  g.beginPath(); g.moveTo(X(xs[0]), YQ(0));
+  uhResult.Q.forEach((q, i) => g.lineTo(X(xs[i]), YQ(q)));
+  g.lineTo(X(xs[n - 1]), YQ(0)); g.closePath(); g.fillStyle = 'rgba(56,189,248,0.22)'; g.fill();
+  g.beginPath(); uhResult.Q.forEach((q, i) => { i ? g.lineTo(X(xs[i]), YQ(q)) : g.moveTo(X(xs[i]), YQ(q)); });
+  g.strokeStyle = '#0284c7'; g.lineWidth = 2.2; g.stroke();
+  // 土石流歷線
+  if (Qd) {
+    g.setLineDash([6, 4]); g.beginPath(); Qd.forEach((q, i) => { i ? g.lineTo(X(xs[i]), YQ(q)) : g.moveTo(X(xs[i]), YQ(q)); });
+    g.strokeStyle = '#dc2626'; g.lineWidth = 2.2; g.stroke(); g.setLineDash([]);
+  }
+  // 尖峰標註
+  let pi = 0; uhResult.Q.forEach((q, i) => { if (q > uhResult.Q[pi]) pi = i; });
+  g.fillStyle = '#0284c7'; g.beginPath(); g.arc(X(xs[pi]), YQ(uhResult.Q[pi]), 3.5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#0f172a'; g.textAlign = 'left'; g.textBaseline = 'bottom';
+  const pk = `Qp = ${uhResult.Q[pi].toFixed(1)} cms（${xs[pi]} hr）`;
+  const px = X(xs[pi]), tw = g.measureText(pk).width;
+  g.fillText(pk, px + tw + 12 > W - R ? px - tw - 8 : px + 8, YQ(uhResult.Q[pi]) - 4);
+  // 軸標題與標題
+  g.fillStyle = '#334155'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.fillText('時間 (hr)', L + pw / 2, H - 12);
+  g.save(); g.translate(18, T + ph / 2); g.rotate(-Math.PI / 2); g.fillStyle = '#0369a1'; g.fillText('流量 Q (cms)', 0, 0); g.restore();
+  g.save(); g.translate(W - 16, T + ph / 2); g.rotate(Math.PI / 2); g.fillStyle = '#b45309'; g.fillText('有效雨量 Re (mm，向下)', 0, 0); g.restore();
+  g.fillStyle = '#0f172a'; g.font = 'bold 14px "Microsoft JhengHei","Noto Sans CJK TC",sans-serif'; g.textAlign = 'left';
+  g.fillText(`${targetT} 年重現期　有效雨量與洪水歷線`, L, 22);
+  // 圖例
+  g.font = '12px "Microsoft JhengHei","Noto Sans CJK TC",sans-serif'; g.textBaseline = 'middle';
+  let lx = L, ly = 40;
+  const item = (label, draw) => { draw(lx, ly); g.fillStyle = '#334155'; g.textAlign = 'left'; g.fillText(label, lx + 26, ly); lx += 26 + g.measureText(label).width + 22; };
+  item('清水流量 Q(t)', (x, y) => { g.strokeStyle = '#0284c7'; g.lineWidth = 2.2; g.setLineDash([]); g.beginPath(); g.moveTo(x, y); g.lineTo(x + 20, y); g.stroke(); });
+  if (Qd) item(`土石流流量 Qd(t)（Cd=${dfMetrics.Cd.toFixed(3)}）`, (x, y) => { g.strokeStyle = '#dc2626'; g.lineWidth = 2.2; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(x, y); g.lineTo(x + 20, y); g.stroke(); g.setLineDash([]); });
+  item('有效雨量 Re(t)', (x, y) => { g.fillStyle = 'rgba(245,158,11,0.85)'; g.fillRect(x + 2, y - 6, 16, 12); });
+  return cv.toDataURL('image/png');
+}
+
 function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics, off) {
   let offCvs = null, ctx;
   if (off) { offCvs = document.createElement('canvas'); offCvs.width = 920; offCvs.height = 420; ctx = offCvs.getContext('2d'); }
@@ -4499,7 +4576,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   const mapImgUrl = await renderWatershedMapImageForReport(d);
   const stormImgUrl = renderStormPatternImageForReport(d.stormPattern24, d.targetT);
   let hydroImgUrl = "";
-  try { hydroImgUrl = renderNonOverlappingHydroChart(d.targetUhRes, d.targetT, d.dfMetrics, true); } catch (e) { console.error(e); }
+  try { hydroImgUrl = drawHydroReportImage(d.targetUhRes, d.targetT, d.dfMetrics); } catch (e) { console.error(e); }
   setStatus("✅ 集水區水文、水理及土砂分析報告已開啟於新分頁！");
 
   const halfLen = Math.ceil(d.amsYears.length / 2);
@@ -4882,7 +4959,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
   ${hydroImgUrl ? `
   <div class="fig-box">
-    <img src="${hydroImgUrl}" style="background:#0f172a; padding:10px;" alt="設計洪水與單位歷線演算圖" />
+    <img src="${hydroImgUrl}" style="background:#fff; max-width:100%;" alt="設計洪水與單位歷線演算圖" />
     <div class="fig-caption">圖 4 集水區 ${d.targetT} 年重現期有效雨量與直接逕流（含土石流）洪水歷線圖</div>
   </div>` : ''}
 
