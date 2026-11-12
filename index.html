@@ -1952,7 +1952,7 @@ function buildThiessenForWatershed(watershedFeature, totalAreaKm2) {
             ...m,
             areaKm2: aKm2 / members.length, areaHa: aKm2 * 100 / members.length, weight: (aKm2 / totalAreaKm2) / members.length,
             clipped,
-            checked: !isWraStation(m) || stationHasData(m),   // 水利署站預設不勾選（尚無雨量資料），勾選後才參與徐昇分割
+            checked: true,   // 水利署站與氣象署站一樣預設勾選並參與徐昇分割；尚無資料者會提示上傳或取消勾選
             groupSize: members.length
           }));
         }
@@ -1966,7 +1966,7 @@ function buildThiessenForWatershed(watershedFeature, totalAreaKm2) {
   // 2) 水利署站：與 CODiS 站一起切割，凡徐昇區落在集水區內者列入清單（預設不勾選，不影響原 CODiS 權重）
   if (wraEnabled()) {
     const wraHits = clipStations(ALL_STATIONS, isWraStation);
-    wraHits.forEach(w => { if (w.checked) currentThiessenList.push(w); else currentThiessenList.push({ ...w, areaKm2: 0, areaHa: 0, weight: 0, clipped: null }); });
+    wraHits.forEach(w => currentThiessenList.push(w));
   }
 
   if (currentThiessenList.length === 0) {
@@ -2108,7 +2108,7 @@ function refreshThiessenUI() {
     if (needUpload) tr.style.background = "#450a0a";
     tr.innerHTML = `
       <td style="text-align:center;"><input type="checkbox" class="chk-st" data-idx="${idx}" ${st.checked ? 'checked' : ''} style="width:auto;margin:0;"/></td>
-      <td><strong>${st.name}</strong>${isWraStation(st) ? ` <span style="color:#d8b4fe;font-size:10.5px;">[${st.org === '台灣電力公司' ? '台電' : '水利署'}]</span>` : ''}${st.withdrawn ? ' <span style="color:#f59e0b;font-size:10.5px;">(撤銷站)</span>' : ''} <span style="color:#94a3b8;font-size:10px;">(${st.id})</span>${st.groupSize > 1 ? '<div style="color:#94a3b8;font-size:10px;">同位置遷站/汰換站，與同座標站平分此徐昇區</div>' : ''}${needUpload ? '<div style="color:#fca5a5;font-size:10.5px;">⚠ 需先上傳此站 CODiS Excel</div>' : ''}</td>
+      <td><strong>${st.name}</strong>${isWraStation(st) ? ` <span style="color:#d8b4fe;font-size:10.5px;">[${st.org === '台灣電力公司' ? '台電' : '水利署'}]</span>` : ''}${st.withdrawn ? ' <span style="color:#f59e0b;font-size:10.5px;">(撤銷站)</span>' : ''} <span style="color:#94a3b8;font-size:10px;">(${st.id})</span>${st.groupSize > 1 ? '<div style="color:#94a3b8;font-size:10px;">同位置遷站/汰換站，與同座標站平分此徐昇區</div>' : ''}${needUpload ? `<div style="color:#fca5a5;font-size:10.5px;">⚠ 需先上傳此站雨量 Excel（${isWraStation(st) ? '水利署年報轉出檔' : 'CODiS'}），或取消勾選</div>` : ''}</td>
       <td>${st.elev}</td>
       <td>${st.checked ? st.areaHa.toFixed(1) : '0.0 (未採用)'}</td>
       <td><strong>${st.checked ? (st.weight * 100).toFixed(1) + '%' : '0.0%'}</strong></td>
@@ -3645,9 +3645,9 @@ function runFrequencyAndHydrology() {
   const missing = useList.filter(s => !stationHasData(s));
   if (useList.length === 0 || missing.length > 0) {
     const names = missing.map(s => `<strong>${s.name}${s.withdrawn ? '(撤銷站)' : ''}</strong> (${s.id})`).join("、");
-    clearHydrologyOutputs("請先上傳勾選雨量站之 CODiS 雨量 Excel");
+    clearHydrologyOutputs("請先上傳勾選雨量站之雨量 Excel（或取消勾選無資料的站）");
     setStatus(
-      `⛔ 控制點集水區已劃定，但下列採用雨量站尚無 CODiS 雨量資料：${names}。<br>` +
+      `⛔ 控制點集水區已劃定，但下列採用雨量站尚無雨量資料：${names}。<br>` +
       `請於「步驟 2 & 3」上傳各站日資料／時資料 Excel (可批次上傳)，或取消勾選該站 (系統將以其餘勾選站重切徐昇面積至 100%)。`,
       "error"
     );
