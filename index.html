@@ -158,6 +158,27 @@
       <input type="file" id="batchCodisUpload" accept=".xlsx,.xls,.csv" multiple style="margin-bottom:2px;" />
       <div style="font-size:11.5px; color:#cbd5e1; margin:2px 0 4px;">
         支援：CODiS 下載之 xlsx（日資料／時資料）、水利署年報轉出 Excel、CSV 長表格（站號、站名、觀測時間、日雨量_mm 或 時雨量_mm；氣象署站與水利署站皆可）。水利署站時雨量 CSV 目前僅保存、核對，不用於頻率分析。<br>
+        <details id="driveBox" style="border:1px solid #334155; border-radius:6px; padding:4px 6px; margin:4px 0 6px; background:#0b1220;">
+          <summary style="cursor:pointer; color:#a5b4fc; font-weight:bold;">☁ 我的 Google Drive 雨量資料（僅限已設定金鑰之電腦）</summary>
+          <div style="font-size:11px; color:#94a3b8; margin:4px 0;">網址與金鑰只存在這台電腦的瀏覽器，不在網頁程式內；未設定者看不到任何雲端資料，請改用上方上傳。</div>
+          <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="driveUrl" placeholder="Apps Script 網頁應用程式網址（…/exec）" style="flex:2; min-width:180px; margin:0;" />
+            <input type="password" id="driveKey" placeholder="金鑰" style="flex:1; min-width:90px; margin:0;" />
+            <button id="btnDriveConnect" style="width:auto; margin:0;">連線</button>
+            <button id="btnDriveForget" class="secondary" style="width:auto; margin:0;">清除本機設定</button>
+          </div>
+          <div id="driveStatus" style="margin:4px 0; font-size:11.5px;"></div>
+          <div id="driveTools" style="display:none;">
+            <label style="display:inline-flex; align-items:center; gap:6px; margin:0;"><input type="checkbox" id="chkDriveAuto" checked style="width:auto; margin:0;" /> 劃定集水區後自動載入採用雨量站之雲端資料</label>
+            <div style="display:flex; gap:4px; margin:4px 0;">
+              <button id="btnDriveLoadNow" class="secondary" style="width:auto; margin:0;">立即載入目前採用站</button>
+              <button id="btnDriveRefresh" class="secondary" style="width:auto; margin:0;">重新整理雲端清單</button>
+            </div>
+            <input type="text" id="driveSearch" placeholder="搜尋雲端站號或站名，手動載入" style="margin:0;" />
+            <div id="driveSearchRes" style="max-height:160px; overflow:auto; font-size:11.5px; color:#cbd5e1;"></div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">雲端載入之水利署站使用全部合格年（不套用下方「最近 N 年」）；水利署時雨量不下載。</div>
+          </div>
+        </details>
         水利署站頻率分析採用最近 <input type="number" id="input_wraRecentN" value="15" min="0" max="100" step="1" style="width:56px; display:inline-block; margin:0 2px;" /> 個「合格」年（0＝全部合格年）；僅適用水利署站，不要求年份連續。
       </div>
       <div style="font-size:11px; color:#94a3b8;">
@@ -2243,6 +2264,7 @@ function refreshThiessenUI() {
     `;
     tbody.appendChild(sumTr);
   }
+  if (typeof driveIdx !== 'undefined' && driveIdx && (document.getElementById('chkDriveAuto') || {}).checked) setTimeout(() => driveAutoLoad(false), 0);
 }
 
 function cleanCodisValue(v) {
@@ -2568,7 +2590,7 @@ function parseWraYearbookWorkbook(wb) {
 function wraRecentN() { const e = document.getElementById('input_wraRecentN'); const v = e ? parseInt(e.value) : 15; return isFinite(v) && v > 0 ? v : 0; }
 function applyWraAdoption(db) {
   const dm = {}, ams = {}, ann = {}; let n = 0, sum = 0;
-  const N = wraRecentN();
+  const N = db.wraUseAll ? 0 : wraRecentN();
   const adopted = (db.wraQC || []).filter(q => q.adopt).sort((a, b) => b.year - a.year);
   const use = new Set((N > 0 ? adopted.slice(0, N) : adopted).map(q => q.year));
   (db.wraQC || []).forEach(q => {
@@ -2809,7 +2831,8 @@ async function addRainFile(file, opt = {}) {
   const prev = rainSources[r.stId] || [];
   const ov = (cat, ys) => { const had = new Set(prev.filter(x => x.cat.includes(cat)).flatMap(x => cat === 'D' ? x.yearsD : x.yearsH)); return ys.filter(y => had.has(y)); };
   const ovD = ov('D', r.yearsD || []), ovH = ov('H', r.yearsH || []);
-  (rainSources[r.stId] = prev).push({ seq: ++rainSrcSeq, file, name: file.name, kindLabel: r.kindLabel, cat: ((r.yearsD || []).length ? 'D' : '') + ((r.yearsH || []).length ? 'H' : ''), yearsD: r.yearsD || [], yearsH: r.yearsH || [], warn: r.warn || '' });
+  if (opt.fromDrive && stationRainDB[r.stId] && stationRainDB[r.stId].wraQC) { stationRainDB[r.stId].wraUseAll = true; applyWraAdoption(stationRainDB[r.stId]); }
+  (rainSources[r.stId] = prev).push({ seq: ++rainSrcSeq, file, name: file.name, fromDrive: !!opt.fromDrive, kindLabel: (opt.fromDrive ? '☁ Drive ' : '') + r.kindLabel, cat: ((r.yearsD || []).length ? 'D' : '') + ((r.yearsH || []).length ? 'H' : ''), yearsD: r.yearsD || [], yearsH: r.yearsH || [], warn: r.warn || '' });
   const inList = currentThiessenList.find(x => x.id === r.stId);
   const st = ALL_STATIONS.find(x => x.id === r.stId);
   if (inList && st && stationHasData(st)) inList.checked = true;
@@ -2832,7 +2855,7 @@ async function rebuildStationFromSources(stId) {
     catch (err) { console.error(err); }
   }
   const db = stationRainDB[stId];
-  if (db && db.wraQC) { db.wraQC.forEach(q => { if (q.year in keepAdopt) q.adopt = keepAdopt[q.year]; }); applyWraAdoption(db); }
+  if (db && db.wraQC) { if (list.some(x => x.fromDrive)) db.wraUseAll = true; db.wraQC.forEach(q => { if (q.year in keepAdopt) q.adopt = keepAdopt[q.year]; }); applyWraAdoption(db); }
   rainDataVersion++;
 }
 function afterRainDataChange() {
@@ -2883,6 +2906,147 @@ document.addEventListener('click', async (e) => {
     if (!hasMissingActiveStations()) setStatus(`✅ 已清空 <strong>${id}</strong> 的雨量資料。`);
   }
 });
+
+// ---- Google Drive 雨量資料（擁有者專用：Apps Script 網頁應用程式＋金鑰，設定只存在本機瀏覽器）----
+const DRIVE_LS = 'wh_drive_cfg_v1', DRIVE_MAP_LS = 'wh_drive_map_v1';
+var driveCfg = null, driveIdx = null, driveBusy = false;
+const driveTried = new Set();
+function driveLoadCfg() { try { driveCfg = JSON.parse(localStorage.getItem(DRIVE_LS) || 'null'); } catch (e) { driveCfg = null; } return driveCfg; }
+function driveMsg(html, cls) { const el = document.getElementById('driveStatus'); if (el) { el.innerHTML = html; el.style.color = cls === 'error' ? '#f87171' : (cls === 'warn' ? '#fbbf24' : '#a7f3d0'); } }
+async function driveFetch(params) {
+  const u = driveCfg.url + (driveCfg.url.includes('?') ? '&' : '?') + new URLSearchParams(Object.assign({}, params, { key: driveCfg.key })).toString();
+  const r = await fetch(u, { redirect: 'follow' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r;
+}
+// IndexedDB 快取：key = 檔案 ID，值 { m: 修改時間, t: 內容 }；Drive 檔更新後自動重抓
+let driveIdbP = null;
+function driveIdb() {
+  if (driveIdbP) return driveIdbP;
+  driveIdbP = new Promise((res, rej) => {
+    setTimeout(() => rej(new Error('IndexedDB 逾時')), 2000);   // 部分環境（無痕、file://）IndexedDB 不可用：略過快取
+    try {
+      const rq = indexedDB.open('wh_drive_cache', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('files');
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+    } catch (e) { rej(e); }
+  });
+  driveIdbP.catch(() => { });
+  return driveIdbP;
+}
+async function driveCacheGet(k) { try { const db = await driveIdb(); return await new Promise(r => { const q = db.transaction('files').objectStore('files').get(k); q.onsuccess = () => r(q.result || null); q.onerror = () => r(null); }); } catch (e) { return null; } }
+async function driveCachePut(k, v) { try { const db = await driveIdb(); await new Promise(r => { const tx = db.transaction('files', 'readwrite'); tx.objectStore('files').put(v, k); tx.oncomplete = r; tx.onerror = r; }); } catch (e) { } }
+async function driveGetText(e) {
+  const c = await driveCacheGet(e.f);
+  if (c && c.m === e.m) return c.t;
+  const t = await (await driveFetch({ action: 'get', id: e.f })).text();
+  if (/^\s*\{"error"/.test(t)) throw new Error(JSON.parse(t).error);
+  await driveCachePut(e.f, { m: e.m, t });
+  return t;
+}
+async function driveConnect(refresh) {
+  if (!driveCfg || !driveCfg.url || !driveCfg.key) { driveMsg('請先填入網址與金鑰。', 'warn'); return false; }
+  driveMsg('連線中…');
+  try {
+    const j = await (await driveFetch({ action: 'index', refresh: refresh ? '1' : '0' })).json();
+    if (j.error) throw new Error(j.error === 'unauthorized' ? '金鑰不正確' : j.error);
+    driveIdx = j.files || [];
+    const nW = new Set(driveIdx.filter(e => e.s === 'W').map(e => e.c)).size, nC = new Set(driveIdx.filter(e => e.s === 'C').map(e => e.c)).size;
+    driveMsg(`✅ 已連線（索引 ${new Date(j.at).toLocaleString()}）：水利署 ${nW} 站、氣象署 ${nC} 站。`);
+    document.getElementById('driveTools').style.display = 'block';
+    return true;
+  } catch (err) {
+    driveIdx = null;
+    driveMsg(`❌ 連線失敗：${err.message}。請確認網址為「網頁應用程式」部署網址（…/exec）、存取權為「所有人」，且金鑰與程式內 KEY 相同。`, 'error');
+    return false;
+  }
+}
+const driveFirstYear = t => { const m = String(t).slice(0, 400).match(/\n[^,\n]*,[^,\n]*,\s*(\d{4})/); return m ? +m[1] : null; };
+// 找出某雨量站在 Drive 的檔案：氣象署站以站號；水利署站（工具用 8 碼站號、Drive 用舊站號）以站名對應，同名多站時比對資料起始年與站籍記錄年
+async function driveEntriesFor(st) {
+  if (!driveIdx) return { list: [] };
+  if (!isWraStation(st)) return { list: driveIdx.filter(e => e.s === 'C' && e.c === st.id) };
+  let map = {}; try { map = JSON.parse(localStorage.getItem(DRIVE_MAP_LS) || '{}'); } catch (e) { }
+  const W = driveIdx.filter(e => e.s === 'W' && e.k === 'D');   // 水利署時雨量目前不用於分析，不下載
+  let code = map[st.id] && W.some(e => e.c === map[st.id]) ? map[st.id] : (W.some(e => e.c === st.id) ? st.id : null);
+  if (!code) {
+    const codes = [...new Set(W.filter(e => stationBaseName(e.n) === stationBaseName(st.name)).map(e => e.c))];
+    if (codes.length === 1) code = codes[0];
+    else if (codes.length > 1) {
+      const y0 = parseInt(st.period);
+      for (const c of codes) {
+        try { if (driveFirstYear(await driveGetText(W.find(e => e.c === c))) === y0) { code = c; break; } } catch (e) { }
+      }
+      if (!code) return { list: [], ambiguous: codes };
+    }
+    if (code) { map[st.id] = code; try { localStorage.setItem(DRIVE_MAP_LS, JSON.stringify(map)); } catch (e) { } }
+  }
+  return { list: code ? W.filter(e => e.c === code) : [] };
+}
+async function driveLoadEntry(e, st) {
+  const text = await driveGetText(e);
+  const file = new File([text], `${e.c}_${e.n}_${e.k === 'D' ? '日雨量' : '時雨量'}.csv`, { type: 'text/csv' });
+  return st ? addRainFile(file, { forcedStId: st.id, forcedStName: st.name, fromDrive: true }) : addRainFile(file, { fromDrive: true });
+}
+async function driveAutoLoad(force) {
+  if (!driveIdx || driveBusy) return;
+  const targets = currentThiessenList.filter(st => st.checked && (force || !driveTried.has(st.id)) && !(rainSources[st.id] || []).some(x => x.fromDrive));
+  if (!targets.length) return;
+  driveBusy = true;
+  const logs = [], miss = [], warns = [];
+  try {
+    for (const st of targets) {
+      driveTried.add(st.id);
+      driveMsg(`☁ 正在從 Drive 載入 ${st.name}（${st.id}）…`);
+      try {
+        const r = await driveEntriesFor(st);
+        if (!r.list.length) { miss.push(`${st.name}${r.ambiguous ? '（同名多站 ' + r.ambiguous.join('/') + '，無法判定，請用下方搜尋手動載入）' : ''}`); continue; }
+        for (const e of r.list.sort((a, b) => a.k.localeCompare(b.k))) {   // 先日後時
+          const x = await driveLoadEntry(e, st);
+          logs.push(x.text); if (x.warn) warns.push(x.warn);
+        }
+      } catch (err) { miss.push(`${st.name}（${err.message}）`); }
+    }
+  } finally { driveBusy = false; }
+  if (logs.length) afterRainDataChange();
+  driveMsg(`☁ Drive 載入完成：${logs.length ? logs.join('、') : '無新資料'}` + (miss.length ? `<br>Drive 中找不到：${miss.join('、')}` : '') + warns.map(w => `<br>⚠️ ${w}`).join(''), miss.length || warns.length ? 'warn' : '');
+}
+function driveRenderSearch() {
+  const box = document.getElementById('driveSearchRes'), q = document.getElementById('driveSearch').value.trim();
+  if (!driveIdx || !q) { box.innerHTML = ''; return; }
+  const hit = driveIdx.filter(e => e.c.toUpperCase().includes(q.toUpperCase()) || e.n.includes(q)).slice(0, 30);
+  box.innerHTML = hit.length ? hit.map(e => `<div style="display:flex; gap:6px; align-items:center; margin:2px 0;">
+      <button class="secondary drive-load1" data-f="${e.f}" style="width:auto; margin:0; padding:1px 8px; font-size:11px;">載入</button>
+      <span>${e.s === 'W' ? '水利署' : '氣象署'} ${e.c} ${e.n}　${e.k === 'D' ? '日雨量' : '時雨量'}　${(e.z / 1024).toFixed(0)} KB</span></div>`).join('') : '<div style="color:#94a3b8;">找不到</div>';
+}
+function driveInitUI() {
+  const cfg = driveLoadCfg();
+  const u = document.getElementById('driveUrl'), k = document.getElementById('driveKey');
+  if (cfg) { u.value = cfg.url || ''; k.value = cfg.key || ''; document.getElementById('driveBox').open = true; driveConnect(false); }
+  document.getElementById('btnDriveConnect').addEventListener('click', async () => {
+    driveCfg = { url: u.value.trim(), key: k.value.trim() };
+    if (await driveConnect(true)) { try { localStorage.setItem(DRIVE_LS, JSON.stringify(driveCfg)); } catch (e) { } if (currentThiessenList.length && document.getElementById('chkDriveAuto').checked) driveAutoLoad(false); }
+  });
+  document.getElementById('btnDriveForget').addEventListener('click', () => {
+    if (!window.confirm('清除此電腦上的 Drive 網址、金鑰與快取資料？')) return;
+    try { localStorage.removeItem(DRIVE_LS); localStorage.removeItem(DRIVE_MAP_LS); driveIdbP = null; indexedDB.deleteDatabase('wh_drive_cache'); } catch (e) { }
+    driveCfg = null; driveIdx = null; u.value = ''; k.value = '';
+    document.getElementById('driveTools').style.display = 'none';
+    driveMsg('已清除此電腦上的設定與快取。');
+  });
+  document.getElementById('btnDriveLoadNow').addEventListener('click', () => { if (!currentThiessenList.length) { driveMsg('請先在地圖上劃定集水區。', 'warn'); return; } driveAutoLoad(true); });
+  document.getElementById('btnDriveRefresh').addEventListener('click', () => driveConnect(true));
+  document.getElementById('driveSearch').addEventListener('input', driveRenderSearch);
+  document.getElementById('driveSearchRes').addEventListener('click', async (ev) => {
+    const b = ev.target.closest && ev.target.closest('.drive-load1'); if (!b) return;
+    const e = driveIdx.find(x => x.f === b.dataset.f); if (!e) return;
+    b.disabled = true; driveMsg(`☁ 載入 ${e.c} ${e.n}…`);
+    try { const x = await driveLoadEntry(e, null); afterRainDataChange(); driveMsg(`☁ ${x.text}` + (x.warn ? `<br>⚠️ ${x.warn}` : ''), x.warn ? 'warn' : ''); }
+    catch (err) { driveMsg(`❌ ${err.message}`, 'error'); }
+    b.disabled = false;
+  });
+}
+driveInitUI();
 
 document.getElementById('batchCodisUpload').addEventListener('change', async (e) => {
   const files = Array.from(e.target.files);
