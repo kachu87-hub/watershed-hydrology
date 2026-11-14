@@ -443,16 +443,43 @@
         </div>
         <div>
           <label>溪床坡度 θ (度)</label>
-          <input type="number" id="input_df_theta" value="8.5" min="1" max="30" step="0.5" style="margin-bottom:0;" />
+          <input type="number" id="input_df_theta" value="8.5" min="1" max="45" step="0.5" style="margin-bottom:0;" />
         </div>
         <div>
           <label>內摩擦角 φ (度)</label>
           <input type="number" id="input_df_phi" value="35.0" min="25" max="45" step="1" style="margin-bottom:0;" />
         </div>
         <div>
-          <label>體積濃度 C<sub>d</sub> (0.3~0.585)</label>
+          <label>體積濃度 C<sub>d</sub>（採用值）</label>
           <input type="text" id="ui_df_Cd" value="0.300" readonly style="margin-bottom:0; background:#0f172a; color:#fca5a5; font-weight:bold;" />
           <div id="ui_df_CdNote" style="font-size:10.5px; color:#94a3b8; margin-top:3px;"></div>
+        </div>
+      </div>
+      <div class="grid-4" style="margin-top:6px;">
+        <div>
+          <label>動摩擦係數 tanα（式 1.2.3）</label>
+          <input type="number" id="input_df_tanA" value="0.32" min="0.05" max="1" step="0.01" style="margin-bottom:0;" />
+          <div style="font-size:10.5px; color:#94a3b8; margin-top:3px;">手冊範例值 0.32，可自行修改</div>
+        </div>
+        <div style="grid-column: span 2;">
+          <label>靜止土體最大濃度 C<sub>m</sub>（手冊表 土1-2-2）</label>
+          <select id="sel_df_Cm" style="margin-bottom:0;">
+            <option value="0.56" selected>疏鬆均勻砂（孔隙率 0.44）Cm = 0.56</option>
+            <option value="0.69">緊密均勻砂（0.31）Cm = 0.69</option>
+            <option value="0.61">疏鬆之稜角狀粉土質砂（0.39）Cm = 0.61</option>
+            <option value="0.71">緊密之稜角狀粉土質砂（0.29）Cm = 0.71</option>
+            <option value="0.63">硬粘土（0.38）Cm = 0.63</option>
+            <option value="0.53">軟粘土（0.47）Cm = 0.53</option>
+            <option value="0.42">軟粘土（0.58）Cm = 0.42</option>
+            <option value="0.53">黃土（0.47）Cm = 0.53</option>
+            <option value="0.29">軟弱有機質土（0.71）Cm = 0.29</option>
+            <option value="0.24">軟弱有機質土（0.76）Cm = 0.24</option>
+            <option value="custom">自訂…</option>
+          </select>
+        </div>
+        <div>
+          <label>C<sub>m</sub> 數值</label>
+          <input type="number" id="input_df_Cm" value="0.56" min="0.2" max="0.8" step="0.01" style="margin-bottom:0;" />
         </div>
       </div>
     </div>
@@ -1382,39 +1409,64 @@ function setStatus(msg, type = "normal") {
 // 3. 土石流體積濃度 Cd 與土石流尖峰流量 Qd 計算器 (依水土保持技術規範)
 // ============================================================================
 function calcDebrisFlowMetrics(Qp_clear) {
+  // 依水土保持手冊（土石流篇 1.2.1、1.2.3）：
+  //  ‧ 10°≤θ≤20° 先用 Takahashi 式 (1.2.2)；θ 在此範圍外、或結果不合理 → 改用 Lien & Tsai 式 (1.2.3)
+  //  ‧ 合理範圍 式(1.2.7)：Cdmin ≤ Cd < 0.9Cm，Cdmin = γw/(γw+γs) 式(1.2.8)
+  //  ‧ 土石流洪峰流量 式(1.2.13)：Q_D = Cm/(Cm−Cd)·Qp
   const isDebris = document.getElementById('chkDebrisStream').checked;
   const thetaDeg = parseFloat(document.getElementById('input_df_theta').value) || 8.5;
   const phiDeg = parseFloat(document.getElementById('input_df_phi').value) || 35.0;
-  const gamma_w = 1.0, gamma_s = 2.65, C_star = 0.65;
-
-  const tanTheta = Math.tan(thetaDeg * Math.PI / 180);
+  const tanA = parseFloat(document.getElementById('input_df_tanA').value) || 0.32;
+  const Cm = Math.min(0.9, Math.max(0.1, parseFloat(document.getElementById('input_df_Cm').value) || 0.56));
+  const gamma_w = 1.0, gamma_s = 2.65;
   const tanPhi = Math.tan(phiDeg * Math.PI / 180);
-  const CD_MIN = 0.30, CD_MAX = 0.9 * C_star;
-  let Cd_raw = null;
-  if (tanPhi > tanTheta) {
-    Cd_raw = (gamma_w * tanTheta) / ((gamma_s - gamma_w) * (tanPhi - tanTheta));
+  let tanTheta = Math.tan(thetaDeg * Math.PI / 180);
+  const CD_MIN = gamma_w / (gamma_w + gamma_s), CD_MAX = 0.9 * Cm;
+  const f3 = x => x.toFixed(3);
+
+  // 式 (1.2.2) Takahashi
+  let CdT = null;
+  if (tanPhi > tanTheta) CdT = (gamma_w * tanTheta) / ((gamma_s - gamma_w) * (tanPhi - tanTheta));
+  const inRange = x => x !== null && isFinite(x) && x >= CD_MIN && x < CD_MAX;
+
+  // 式 (1.2.3) Lien & Tsai（tanθ=tanα 時式 1.2.6 不成立，微調 θ 避開）
+  let tanT2 = tanTheta;
+  if (Math.abs(tanA - tanT2) < 1e-4) tanT2 = tanA + 1e-4;
+  const x1 = gamma_w * tanT2 / ((gamma_s - gamma_w) * (tanA - tanT2));
+  const x2 = 0.04 / (tanA - tanT2);
+  const bq = Cm + x1 + x2, disc = bq * bq - 4 * x1 * Cm;
+  let CdL = null;
+  if (disc >= 0) {
+    const r1 = 0.5 * (bq - Math.sqrt(disc)), r2 = 0.5 * (bq + Math.sqrt(disc));
+    const c = [r1, r2].filter(r => r > 0 && r <= Cm);       // 取落在 (0, Cm] 的根（θ<α 為減號根，θ>α 為加號根）
+    if (c.length) CdL = Math.min(...c);
   }
-  const Cd = Cd_raw === null ? CD_MIN : Math.min(CD_MAX, Math.max(CD_MIN, Cd_raw));
-  let CdNote, CdState;
-  if (Cd_raw === null) { CdState = "invalid"; CdNote = "θ ≥ φ，公式不適用 → 取 0.300"; }
-  else if (Cd_raw < CD_MIN) { CdState = "low"; CdNote = `公式值 ${Cd_raw.toFixed(3)} → 依規範下限取 ${CD_MIN.toFixed(3)}`; }
-  else if (Cd_raw > CD_MAX) { CdState = "high"; CdNote = `公式值 ${Cd_raw.toFixed(3)} → 依規範上限取 ${CD_MAX.toFixed(3)} (0.9C*)`; }
-  else { CdState = "ok"; CdNote = `公式值 ${Cd_raw.toFixed(3)}（${CD_MIN.toFixed(2)}~${CD_MAX.toFixed(3)} 範圍內，直接採用）`; }
-  document.getElementById('ui_df_Cd').value = Cd.toFixed(3);
+
+  let Cd, Cd_raw, method, CdState, CdNote, reason;
+  if (thetaDeg >= 10 && thetaDeg <= 20 && inRange(CdT)) {
+    method = 'T'; Cd_raw = CdT; Cd = CdT; CdState = 'ok';
+    CdNote = `θ 在 10°~20°，採式(1.2.2) Cd=${f3(CdT)}`;
+    reason = 'Takahashi';
+  } else {
+    method = 'L'; Cd_raw = CdL;
+    reason = (thetaDeg < 10 || thetaDeg > 20) ? `θ=${thetaDeg}° 不在 10°~20° 範圍` : `式(1.2.2) 結果 ${CdT === null ? '不適用(θ≥φ)' : f3(CdT)} 超出合理範圍`;
+    if (CdL === null) { Cd = CD_MIN; CdState = 'invalid'; CdNote = `${reason}；式(1.2.3) 無合理解 → 取 Cdmin=${f3(CD_MIN)}`; }
+    else if (CdL < CD_MIN) { Cd = CD_MIN; CdState = 'low'; CdNote = `${reason}，式(1.2.3) 值 ${f3(CdL)} < Cdmin → 取 ${f3(CD_MIN)}`; }
+    else if (CdL >= CD_MAX) { Cd = CD_MAX; CdState = 'high'; CdNote = `${reason}，式(1.2.3) 值 ${f3(CdL)} ≥ 0.9Cm → 取 ${f3(CD_MAX)}`; }
+    else { Cd = CdL; CdState = 'ok'; CdNote = `${reason}，改採式(1.2.3) Cd=${f3(CdL)}`; }
+  }
+  document.getElementById('ui_df_Cd').value = f3(Cd);
   const noteEl = document.getElementById('ui_df_CdNote');
-  if (noteEl) noteEl.textContent = CdNote;
+  if (noteEl) noteEl.textContent = CdNote + `（合理範圍 ${f3(CD_MIN)}~${f3(CD_MAX)}）`;
   document.getElementById('debrisStreamBadge').style.display = isDebris ? 'inline-block' : 'none';
 
-  const Qd = Qp_clear / (1.0 - Cd);
+  const Qd = Qp_clear * Cm / (Cm - Cd);     // 式(1.2.13)
   return {
     isDebris,
     dfId: document.getElementById('input_df_id').value || "潛勢溪流",
-    thetaDeg,
-    phiDeg,
-    Cd,
-    CdRaw: Cd_raw,
-    CdNote,
-    CdState,
+    thetaDeg, phiDeg, tanA, Cm, CD_MIN, CD_MAX,
+    method, CdT, CdL, Cd, CdRaw: Cd_raw, CdNote, CdState, reason,
+    amp: Cm / (Cm - Cd),
     Qd
   };
 }
@@ -1927,7 +1979,7 @@ function applyWatershedGeometry({ feature, L_m, H_m, channelCoords, outletLatLon
 
   // 由主河道縱坡降自動推算溪床坡度角 theta (度) 供土石流體積濃度計算
   const slopeRatio = elevDiffM / flowLengthM;
-  const slopeDeg = Math.min(25, Math.max(2, +(Math.atan(slopeRatio) * 180 / Math.PI).toFixed(1)));
+  const slopeDeg = Math.min(45, Math.max(1, +(Math.atan(slopeRatio) * 180 / Math.PI).toFixed(1)));
   document.getElementById('input_df_theta').value = slopeDeg;
 
   // 檢查集水區內或控制點 1.5km 內是否包含農村水保署土石流潛勢溪流
@@ -4416,7 +4468,7 @@ function runFrequencyAndHydrology() {
   const chosenSedQ = chosenClearQ * (1 + alphaPct);
 
   const dfMetrics = calcDebrisFlowMetrics(chosenClearQ);
-  const rowDebris = chosenClearSeries.map(q => q / (1.0 - dfMetrics.Cd));
+  const rowDebris = chosenClearSeries.map(q => q * dfMetrics.amp);
 
   const peakBody = document.getElementById('peakSummaryBody');
   peakBody.innerHTML = `
@@ -4437,7 +4489,7 @@ function runFrequencyAndHydrology() {
       ${chosenClearSeries.map(q => `<td><strong>${(q * (1 + alphaPct)).toFixed(2)}</strong></td>`).join('')}
     </tr>
     <tr style="background:${dfMetrics.isDebris ? '#7f1d1d' : '#1e293b'}; color:${dfMetrics.isDebris ? '#fef08a' : '#94a3b8'};">
-      <td><strong>${dfMetrics.isDebris ? '⚠️ ' : ''}土石流尖峰流量 Q<sub>d</sub> = Q<sub>p</sub>/(1-C<sub>d</sub>) (C<sub>d</sub>=${dfMetrics.Cd.toFixed(3)})</strong></td>
+      <td><strong>${dfMetrics.isDebris ? '⚠️ ' : ''}土石流尖峰流量 Q<sub>D</sub> = C<sub>m</sub>/(C<sub>m</sub>−C<sub>d</sub>)·Q<sub>p</sub> (C<sub>d</sub>=${dfMetrics.Cd.toFixed(3)}, C<sub>m</sub>=${dfMetrics.Cm})</strong></td>
       ${rowDebris.map(q => `<td><strong>${q.toFixed(2)}</strong></td>`).join('')}
     </tr>
   `;
@@ -4511,7 +4563,7 @@ function drawHydroReportImage(uhResult, targetT, dfMetrics) {
   const x0 = xs[0], x1 = xs[n - 1] > x0 ? xs[n - 1] : x0 + 1;
   const pw = W - L - R, ph = H - T - B;
   const X = v => L + (v - x0) / (x1 - x0) * pw;
-  const Qd = dfMetrics && dfMetrics.isDebris ? uhResult.Q.map(q => q / (1.0 - dfMetrics.Cd)) : null;
+  const Qd = dfMetrics && dfMetrics.isDebris ? uhResult.Q.map(q => q * dfMetrics.amp) : null;
   const qMax0 = Math.max(...uhResult.Q, ...(Qd || []), 10);
   const niceMax = v => { const e = Math.pow(10, Math.floor(Math.log10(v))); const m = v / e; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * e; };
   const qMax = niceMax(qMax0 * 1.48);
@@ -4582,7 +4634,7 @@ function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics, off) {
   if (off) { offCvs = document.createElement('canvas'); offCvs.width = 920; offCvs.height = 420; ctx = offCvs.getContext('2d'); }
   else { ctx = document.getElementById('hydroChart').getContext('2d'); if (chartInstance) chartInstance.destroy(); }
 
-  const debrisQSeries = uhResult.Q.map(q => +(q / (1.0 - dfMetrics.Cd)).toFixed(2));
+  const debrisQSeries = uhResult.Q.map(q => +(q * dfMetrics.amp).toFixed(2));
   const highestFlow = dfMetrics.isDebris ? Math.max(...debrisQSeries, 10) : Math.max(...uhResult.Q, 10);
   const maxPe = Math.max(...uhResult.Pe_bar, 1);
 
@@ -5430,7 +5482,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
   <h3>七、含砂水流與土石流潛勢溪流流量分析</h3>
   <p>1. <strong>一般含砂水流流量</strong>：考量山區集水區豪雨時易夾帶泥砂，含砂水流洪峰流量以 Q<sub>s</sub> = Q<sub>p</sub>(1 + &alpha;) 估算，採用泥砂混合率 &alpha; = ${(d.alphaPct * 100).toFixed(0)}%。</p>
-  <p>2. <strong>土石流潛勢溪流尖峰流量</strong>：${df.isDebris ? `本溪流屬農業部農村發展及水土保持署公告之土石流潛勢溪流（編號：<strong>${df.dfId}</strong>），` : '若考慮極端暴雨誘發土石流情境，'}依水土保持技術規範，按溪床平衡坡度 &theta; = ${df.thetaDeg}°、土石內摩擦角 &phi; = ${df.phiDeg}°、土石顆粒單位重 &gamma;<sub>s</sub> = 2.65 t/m³ 及清水單位重 &gamma;<sub>w</sub> = 1.0 t/m³，計算土石流體積濃度 C<sub>d</sub> = [&gamma;<sub>w</sub> tan&theta;] / [(&gamma;<sub>s</sub> - &gamma;<sub>w</sub>)(tan&phi; - tan&theta;)]${df.CdRaw === null ? `，因 &theta; &ge; &phi; 公式不適用，取規範下限 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>` : ` = 1.0 × tan${df.thetaDeg}° / [1.65 × (tan${df.phiDeg}° − tan${df.thetaDeg}°)] = ${df.CdRaw.toFixed(3)}，${df.CdState === 'ok' ? `落於規範 0.30 &le; C<sub>d</sub> &le; 0.9C<sub>*</sub>（= 0.585）範圍內，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>` : (df.CdState === 'low' ? `低於規範下限 0.30，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>` : `高於規範上限 0.9C<sub>*</sub> = 0.585，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>`)}`}，並以 Q<sub>d</sub> = Q<sub>p</sub> / (1 - C<sub>d</sub>) 推算土石流尖峰流量。各重現期含砂水流與土石流流量成果如表 10 及表 11 所示。</p>
+  <p>2. <strong>土石流潛勢溪流尖峰流量</strong>：${df.isDebris ? `本溪流屬農業部農村發展及水土保持署公告之土石流潛勢溪流（編號：<strong>${df.dfId}</strong>），` : '若考慮極端暴雨誘發土石流情境，'}依水土保持手冊（土石流篇 1.2.1），溪床坡度 &theta; = ${df.thetaDeg}°、土石內摩擦角 &phi; = ${df.phiDeg}°、動摩擦係數 tan&alpha; = ${df.tanA}、靜止土體最大濃度 C<sub>m</sub> = ${df.Cm}、&gamma;<sub>s</sub> = 2.65 t/m³、&gamma;<sub>w</sub> = 1.0 t/m³。${df.method === 'T' ? `&theta; 位於 10°～20° 且 Takahashi 式(1.2.2) C<sub>d</sub> = &gamma;<sub>w</sub>tan&theta; / [(&gamma;<sub>s</sub>−&gamma;<sub>w</sub>)(tan&phi;−tan&theta;)] = ${df.Cd.toFixed(3)} 落於式(1.2.7) 合理範圍 ${df.CD_MIN.toFixed(3)} &le; C<sub>d</sub> &lt; 0.9C<sub>m</sub>（= ${df.CD_MAX.toFixed(3)}），採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。` : `${df.reason}，式(1.2.2) 不適用，改採 Lien &amp; Tsai 式(1.2.3)（C<sub>d</sub> = ½[(C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>) ± &radic;((C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>)² − 4&chi;<sub>1</sub>C<sub>m</sub>)]，&xi; = 0.04）${df.CdRaw === null ? '，式(1.2.3) 無合理解' : '，推得 ' + df.CdRaw.toFixed(3)}，${df.CdState === 'ok' ? '落於式(1.2.7) 合理範圍' : '超出式(1.2.7) 合理範圍 ' + df.CD_MIN.toFixed(3) + '～' + df.CD_MAX.toFixed(3) + ' 而取邊界值'}，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。`}並依式(1.2.13) Q<sub>D</sub> = C<sub>m</sub> / (C<sub>m</sub> − C<sub>d</sub>) &times; Q<sub>p</sub>（放大倍率 ${df.amp.toFixed(2)}）推算土石流尖峰流量。各重現期含砂水流與土石流流量成果如表 10 及表 11 所示。</p>
 
   <div class="caption">表 10 不同重現期距之含砂水流與土石流尖峰流量一覽表（單位：cms）</div>
   <table>
@@ -5485,7 +5537,7 @@ function buildExportCSV(distCode, T, uhResult, qRat, qSed, dfMetrics) {
   let csv = "\uFEFF集水區水文、水理及土石流分析計算書\n";
   csv += `控制點TWD97_X,${twd.x},控制點TWD97_Y,${twd.y},控制點緯度,${twd.lat},控制點經度,${twd.lon}\n`;
   csv += `集水面積 A (ha),${currentWatershedParams.A_ha.toFixed(2)},流路長 L (m),${currentWatershedParams.L_m.toFixed(1)},高程差 H (m),${currentWatershedParams.H_m.toFixed(1)},集流時間 Tc (hr),${currentWatershedParams.Tc_hr.toFixed(2)}\n`;
-  csv += `選用分布,${distCode},重現期(年),${T},合理化洪峰(cms),${qRat.toFixed(2)},修正三角形歷線洪峰(cms),${uhResult.Qp.toFixed(2)},含砂水流洪峰(cms),${qSed.toFixed(2)},Cd公式原始值,${dfMetrics.CdRaw === null ? '不適用(θ≥φ)' : dfMetrics.CdRaw.toFixed(3)},土石流體積濃度Cd(採用),${dfMetrics.Cd.toFixed(3)},土石流尖峰流量Qd(cms),${dfMetrics.Qd.toFixed(2)}\n\n`;
+  csv += `選用分布,${distCode},重現期(年),${T},合理化洪峰(cms),${qRat.toFixed(2)},修正三角形歷線洪峰(cms),${uhResult.Qp.toFixed(2)},含砂水流洪峰(cms),${qSed.toFixed(2)},Cd公式,${dfMetrics.method === 'T' ? '式1.2.2 Takahashi' : '式1.2.3 Lien&Tsai'},tanα,${dfMetrics.tanA},Cm,${dfMetrics.Cm},Cd公式原始值,${dfMetrics.CdRaw === null ? '無合理解' : dfMetrics.CdRaw.toFixed(3)},土石流體積濃度Cd(採用),${dfMetrics.Cd.toFixed(3)},土石流尖峰流量Qd=Cm/(Cm-Cd)*Qp(cms),${dfMetrics.Qd.toFixed(2)}\n\n`;
   if (lastReportData) {
     const d0 = lastReportData, ci = d0.basis && d0.basis.convInfo;
     csv += `採用單位歷線法,${d0.uhMethodLabel},有效雨量方式,${d0.CN_val ? 'CN=' + d0.CN_val : 'C=' + d0.C_coef},三角型洪峰(cms),${d0.triRes.Qp.toFixed(2)},SCS洪峰(cms),${d0.scsRes.Qp.toFixed(2)}\n`;
@@ -5494,7 +5546,7 @@ function buildExportCSV(distCode, T, uhResult, qRat, qSed, dfMetrics) {
   csv += "時間(hr),有效雨量Re(mm),清水流流量Q(cms),土石流流量Qd(cms)\n";
   uhResult.timeAxis.forEach((t, i) => {
     const qClear = uhResult.Q[i];
-    const qDebris = qClear / (1.0 - dfMetrics.Cd);
+    const qDebris = qClear * dfMetrics.amp;
     csv += `${t},${uhResult.Pe_bar[i].toFixed(2)},${qClear.toFixed(2)},${qDebris.toFixed(2)}\n`;
   });
   lastHydroReportCSV = csv;
@@ -5524,6 +5576,17 @@ initHornerUI(); renderCnRows();
 document.getElementById('chkDebrisStream').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_theta').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_phi').addEventListener('change', runFrequencyAndHydrology);
+document.getElementById('input_df_tanA').addEventListener('change', runFrequencyAndHydrology);
+document.getElementById('sel_df_Cm').addEventListener('change', function () {
+  if (this.value !== 'custom') document.getElementById('input_df_Cm').value = this.value;
+  runFrequencyAndHydrology();
+});
+document.getElementById('input_df_Cm').addEventListener('change', function () {
+  const sel = document.getElementById('sel_df_Cm');
+  const hit = Array.from(sel.options).find(o => o.value !== 'custom' && Math.abs(parseFloat(o.value) - parseFloat(this.value)) < 1e-9);
+  sel.value = hit ? hit.value : 'custom';
+  runFrequencyAndHydrology();
+});
 
 document.getElementById('geojsonFile').addEventListener('change', async (e) => {
   const file = e.target.files[0]; if (!file) return;
@@ -5806,7 +5869,7 @@ function multiPointReportHTML(pts, mapImgs) {
 ${sharedTxt ? `<p>${sharedTxt}</p>` : ''}
 <p><strong>注意：各控制點之洪峰流量均為各點集水區獨立計算之結果，未進行歷線匯流演算（支流匯入主流處之歷線疊加、洪峰衰減與時間差未予考慮），故各點洪峰不可直接相加或相減。</strong>如需支流匯入後之主流設計流量，須另以歷線演算。</p>
 <h3>二、共同計算參數</h3>
-<p>逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量 = C × 降雨'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+α)；土石流 Q<sub>d</sub> = Q<sub>p</sub>/(1−C<sub>d</sub>)，僅於判定為土石流潛勢溪流之控制點列出。</p>
+<p>逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量 = C × 降雨'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+α)；土石流 Q<sub>D</sub> = C<sub>m</sub>/(C<sub>m</sub>−C<sub>d</sub>)·Q<sub>p</sub>（手冊式 1.2.13），僅於判定為土石流潛勢溪流之控制點列出。</p>
 <h3>三、控制點成果合併表</h3>
 ${cpMergedHTML(pts, false)}
 ${detail}
