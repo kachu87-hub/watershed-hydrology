@@ -340,7 +340,6 @@
       <div style="font-size:11px; color:#94a3b8; line-height:1.5;">只影響單位歷線法之洪峰（合理化公式不受雨型影響）。報告會並列各雨型之洪峰比較。</div>
       <div id="stormTypeNote" style="font-size:11px; color:#7dd3fc; line-height:1.5;"></div>
     </div>
-    <div style="font-size:11.5px; margin:6px 0;"><label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chkIdfCalib" style="width:auto; margin:0;" /> 合理化公式之降雨強度依頻率分析 P24 校正（預設不校正；Horner 外推 24 hr 時不建議）</label></div>
     <div style="border:1px solid #334155; border-radius:6px; padding:6px; margin:6px 0;" id="idfSourceBox">
       <label>降雨強度公式來源（合理化公式與短延時雨型使用）</label>
       <select id="select_idfSource">
@@ -386,7 +385,7 @@
         <input type="number" id="input_overland_v" value="0.5" min="0.05" max="3" step="0.05" />
       </div>
       <div>
-        <label>逕流係數 C</label>
+        <label>逕流係數 C（合理化公式）</label>
         <input type="number" id="input_C" value="0.75" min="0.05" max="1" step="0.01" />
       </div>
       <div>
@@ -403,17 +402,17 @@
         </select>
       </div>
       <div style="grid-column: span 1;">
-        <label>CN 值（選填）</label>
+        <label>CN 值（優先採用）</label>
         <input type="number" id="input_CN" value="" placeholder="留空不啟用" min="25" max="100" step="0.1" />
       </div>
       <div style="grid-column: span 1;">
         <label>固定損失 φ (mm/hr)</label>
-        <input type="number" id="input_phi" value="" placeholder="留空不啟用" min="0" max="50" step="0.5" />
+        <input type="number" id="input_phi" value="3" placeholder="3.0" min="0" max="50" step="0.5" />
       </div>
     </div>
-    <div style="font-size:11px; color:#94a3b8; line-height:1.5;">單位歷線之有效雨量：填 φ 時用「固定損失」（R<sub>e,j</sub> = max(0, P<sub>j</sub> − φ·Δt)，如東卯溪原報告 4 mm/hr）；否則填 CN 用 SCS 法；兩者皆留空則 R<sub>e</sub> = C × P。</div>
+    <div style="font-size:11px; color:#94a3b8; line-height:1.5;">單位歷線之有效雨量：有填 CN 則用 SCS 曲線號碼法；未填 CN 則用固定損失 φ（水保手冊調章固定值法，範圍 2～4 mm/hr，計算例 3.0；R<sub>e,j</sub> = max(0, P<sub>j</sub> − φ·Δt)）。逕流係數 C 僅用於合理化公式。</div>
     <div style="font-size:11px; color:#94a3b8; line-height:1.5; margin-top:3px;">
-      ※ 預設以逕流係數 C 計算有效雨量（Re = C × P）。CN 法需依土壤水文分類、土地利用與前期含水量（AMC）判定，本工具無此資料，故僅提供手動輸入：填入 CN 後，歷線演算改用 SCS 逕流公式 S = 25400/CN − 254、Ia = 0.2S、Pe = (P − Ia)² / (P − Ia + S)（逐時累積雨量計算），並同時影響兩種單位歷線；合理化公式仍使用 C。清空 CN 即恢復 C 法。
+      ※ 單位歷線有效雨量：填入 CN 時採 SCS 逕流公式 S = 25400/CN − 254、Ia = 0.2S、Pe = (P − Ia)² / (P − Ia + S)（逐時累積雨量計算），並同時影響兩種單位歷線；CN 留空則採固定損失 φ（預設 3.0 mm/hr）。合理化公式仍使用 C。清空 CN 即恢復 φ 法。
     </div>
 
     <details id="cnLookup" style="margin-top:6px; border:1px solid #334155; border-radius:6px; padding:6px;">
@@ -3387,15 +3386,14 @@ function calcDimensionlessIntensity(P_annual_mm, Tc_hr, T_yr) {
 }
 
 // 有效降雨：C 法（Re = C × P）或手動 CN 法（SCS 逕流公式，逐時累積雨量）
+function getLossPhi() {
+  const el = (typeof document !== 'undefined') ? document.getElementById('input_phi') : null;
+  const v = el ? parseFloat(el.value) : NaN;
+  return (isFinite(v) && v >= 0) ? v : 3.0;      // 預設 3.0 mm/hr（水保手冊調章固定值法計算例；範圍 2～4）
+}
+// 單位歷線有效降雨：有 CN 用 SCS CN 法；否則固定損失 φ（C 僅用於合理化公式）
 function effectiveHourlyRain(P24_mm, stormPct24, C_runoff, CN) {
   const hourlyP = stormPct24.map(pct => P24_mm * (pct / 100));
-  const phiEl = (typeof document !== 'undefined') ? document.getElementById('input_phi') : null;
-  const phi = phiEl ? parseFloat(phiEl.value) : NaN;
-  if (phi > 0) {
-    const dsH = 24 / stormPct24.length;
-    const hourlyPe = hourlyP.map(p => Math.max(0, p - phi * dsH));
-    return { hourlyP, hourlyPe, PeTotal: hourlyPe.reduce((a, b) => a + b, 0), mode: "PHI", phi };
-  }
   if (CN && CN >= 25 && CN <= 100) {
     const S = 25400 / CN - 254, Ia = 0.2 * S;
     let cum = 0, prevPe = 0;
@@ -3406,8 +3404,10 @@ function effectiveHourlyRain(P24_mm, stormPct24, C_runoff, CN) {
     });
     return { hourlyP, hourlyPe, PeTotal: prevPe, mode: "CN", CN, S, Ia };
   }
-  const hourlyPe = hourlyP.map(p => p * C_runoff);
-  return { hourlyP, hourlyPe, PeTotal: hourlyPe.reduce((a, b) => a + b, 0), mode: "C", C: C_runoff };
+  const phi = getLossPhi();
+  const dsH = 24 / stormPct24.length;
+  const hourlyPe = hourlyP.map(p => Math.max(0, p - phi * dsH));
+  return { hourlyP, hourlyPe, PeTotal: hourlyPe.reduce((a, b) => a + b, 0), mode: "PHI", phi };
 }
 
 // fine（選填）：{ds, pct}＝短延時雨型，ds 為時距（hr），pct 為 24 hr 內各時段百分率；未給則為逐時（ds = 1）舊行為
@@ -4551,13 +4551,14 @@ function runFrequencyAndHydrology() {
   let triRes = null, scsRes = null, targetRatQp = 0, p24Target = 0;
 
   // 強度校正：合理化公式的 I 與單位歷線之 P24 同源 —— 以頻率分析 P24(T) ÷ 強度公式反推 24 小時雨量 作為校正係數
-  const useCalib = !!(document.getElementById('chkIdfCalib') || {}).checked;
+  const useCalib = false;   // 降雨強度不校正（水保技術規範第16條：推估值不得小於無因次公式值）；k 僅供檢核說明
   const idfCalib = RETURN_PERIODS.map(T => {
     const raw = idfRows.find(x => x.T === T).I;
     const depth24 = idfAt(T, 24, P_annual, idfSrc).I * 24;
     const p24 = freq24.results[selectedCode].quantiles[T];
     const k = (depth24 > 0 && p24 > 0) ? p24 / depth24 : 1;
-    return { T, raw, depth24, p24, k, adj: useCalib ? raw * k : raw };
+    const dimless = calcDimensionlessIntensity(P_annual, rz.Tc_hr, T).I_T;
+    return { T, raw, depth24, p24, k, dimless, adj: raw };
   });
   RETURN_PERIODS.forEach((T, ti) => {
     const iT = idfCalib[ti].adj;
@@ -4669,7 +4670,7 @@ function runFrequencyAndHydrology() {
     scsRes,
     uhMethod,
     uhMethodLabel,
-    CN_val,
+    CN_val, phi_val: getLossPhi(),
     rowDebris,
     targetUhRes,
     chosenClearQ,
@@ -5423,10 +5424,10 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   const tMin = w.Tc_hr * 60;
 
   const calibHTML = `
-  <p><strong>降雨強度與頻率分析雨量之一致性檢核：</strong>強度公式（區域經驗式）與本集水區 24 小時暴雨頻率分析所得之 P<sub>24</sub> 係不同來源。下表以 k = P<sub>24</sub>(T) ÷ 強度公式反推 24 小時雨量 [I(T, 24 hr) × 24] 檢核兩者差距。${d.useCalib ? '本次<strong>已依 k 校正</strong> t<sub>c</sub> 之降雨強度：I<sub>採用</sub> = k × I(T, t<sub>c</sub>)。' : '本次<strong>未校正</strong>（I<sub>採用</sub> = I(T, t<sub>c</sub>)），k 僅供檢核；Horner 公式僅適用短延時，外推至 24 小時時 k 常明顯偏離 1，不宜直接作為校正依據。'}</p>
-  <div class="caption">表 6-2 降雨強度一致性檢核</div>
-  <table><thead><tr><th>T (年)</th><th>公式反推 24 hr 雨量 (mm)</th><th>頻率分析 P<sub>24</sub> (mm)</th><th>差距</th><th>校正係數 k</th><th>I(t<sub>c</sub>) 原值 (mm/hr)</th><th>I(t<sub>c</sub>) 採用值 (mm/hr)</th></tr></thead><tbody>${d.idfCalib.map(c => { const dv = (c.k - 1) * 100; return `<tr${Math.abs(dv) > 10 ? ' style="background:#fef3c7;"' : ''}><td style="text-align:center;">${c.T}</td><td>${c.depth24.toFixed(1)}</td><td>${c.p24.toFixed(1)}</td><td>${dv >= 0 ? '+' : ''}${dv.toFixed(1)}%</td><td>${c.k.toFixed(3)}</td><td>${c.raw.toFixed(2)}</td><td><strong>${c.adj.toFixed(2)}</strong></td></tr>`; }).join('')}</tbody></table>
-  ${d.idfCalib.some(c => Math.abs(c.k - 1) > 0.10) ? '<p style="color:#b45309;">註：標示底色者，強度公式與頻率分析 P<sub>24</sub> 差距超過 10%，建議確認雨量站、年平均雨量或 Horner 測站之選用是否合理。</p>' : ''}`;
+  <p><strong>降雨強度之檢核說明：</strong>合理化公式之降雨強度 I 直接採用所選強度公式於 t<sub>c</sub> 之推估值，<strong>不</strong>以頻率分析 P<sub>24</sub> 調整。依水土保持技術規範第 16 條，降雨強度推估值不得小於無因次降雨強度公式之推估值，故不將 I 調低。另列檢核：以 k = P<sub>24</sub>(T) ÷ 強度公式反推 24 小時雨量 [I(T, 24 hr) × 24] 比較兩雨量來源之差距。強度公式（區域經驗式）與本集水區 24 小時暴雨頻率分析係不同來源，兩者隨重現期之成長率不同；Horner 公式僅適用短延時，外推至 24 小時時 k 常明顯偏離 1，故此表僅作說明，不作修正。單位歷線使用 P<sub>24</sub> 配合雨型，合理化公式使用 I(t<sub>c</sub>)，兩法因雨量來源與雨型不同，成果會有差異。</p>
+  <div class="caption">表 6-2 降雨強度檢核（不調整 I）</div>
+  <table><thead><tr><th>T (年)</th><th>公式反推 24 hr 雨量 (mm)</th><th>頻率分析 P<sub>24</sub> (mm)</th><th>差距</th><th>採用 I(t<sub>c</sub>) (mm/hr)</th><th>無因次公式 I(t<sub>c</sub>) (mm/hr)</th></tr></thead><tbody>${d.idfCalib.map(c => { const dv = (c.k - 1) * 100; const below = c.adj < c.dimless - 1e-6; return `<tr${below ? ' style="background:#fef3c7;"' : ''}><td style="text-align:center;">${c.T}</td><td>${c.depth24.toFixed(1)}</td><td>${c.p24.toFixed(1)}</td><td>${dv >= 0 ? '+' : ''}${dv.toFixed(1)}%</td><td><strong>${c.adj.toFixed(2)}</strong></td><td>${c.dimless.toFixed(2)}</td></tr>`; }).join('')}</tbody></table>
+  ${d.idfCalib.some(c => c.adj < c.dimless - 1e-6) ? '<p style="color:#b45309;">註：標示底色者，採用之降雨強度小於無因次降雨強度公式推估值（水保技術規範第 16 條）；本次採用水利署 Horner 公式等已有測站分析成果，使用時請於報告中說明採用理由。</p>' : ''}`;
   const idfRows = [2, 5, 10, 25, 50, 100, 200].map((T, i) => {
     const lg = Math.log10(T);
     const f1 = idfR.G + idfR.H * lg;
@@ -5454,7 +5455,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   const uh = d.triRes;
   const scs = d.scsRes;
   const cnTable = d.cnApplied ? `<div class="caption">表 8-0 CN 值查表加權（出流管制技術手冊 109.05 表 4-2、4-3、4-4，AMC Ⅱ）</div><table><thead><tr><th>土地利用</th><th>土壤</th><th>面積比例 (%)</th><th>CN</th></tr></thead><tbody>${d.cnApplied.detail.map(x => `<tr><td style="text-align:left;">${x.label}</td><td style="text-align:center;">${x.soil}</td><td>${x.pct}</td><td>${x.cn}</td></tr>`).join('')}<tr><td colspan="3" style="text-align:right;">面積加權 CN${d.cnApplied.capped ? '（依手冊 4.4 開發前 CN > 70 以 70 計）' : ''}</td><td><strong>${d.cnApplied.cn}</strong></td></tr></tbody></table>` : '';
-  const effNote = uh.eff.mode === 'PHI' ? `採固定損失 φ = ${uh.eff.phi} mm/hr（R<sub>e,j</sub> = max(0, P<sub>j</sub> − φ × Δt)，Δt 為雨型時距）` : d.CN_val ? `採${d.cnApplied ? '手冊查表加權之' : '手動輸入之'} CN = ${d.CN_val}（S = 25400/CN − 254 = ${uh.eff.S.toFixed(1)} mm，Ia = 0.2S = ${uh.eff.Ia.toFixed(1)} mm，Pe = (P − Ia)² / (P − Ia + S)，逐時累積雨量計算）` : `採逕流係數 C = ${d.C_coef}（Re = C × P）`;
+  const effNote = uh.eff.mode === 'PHI' ? `採固定損失 φ = ${uh.eff.phi} mm/hr（水土保持手冊調章固定值法，範圍 2～4 mm/hr；R<sub>e,j</sub> = max(0, P<sub>j</sub> − φ × Δt)，Δt 為雨型時距）` : d.CN_val ? `採${d.cnApplied ? '手冊查表加權之' : '手動輸入之'} CN = ${d.CN_val}（S = 25400/CN − 254 = ${uh.eff.S.toFixed(1)} mm，Ia = 0.2S = ${uh.eff.Ia.toFixed(1)} mm，Pe = (P − Ia)² / (P − Ia + S)，逐時累積雨量計算）` : `採逕流係數 C = ${d.C_coef}（Re = C × P）`;
   const fineUH = !!uh.fine;
   const D_u = fineUH ? uh.ds : handbookD_hr(w.Tc_hr);
   const Tr_u = +(1.67 * uh.Tp).toFixed(2);
@@ -5469,7 +5470,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <p>(3) 退水時間：T<sub>r</sub> = 1.67 T<sub>p</sub> = 1.67 × ${uh.Tp.toFixed(2)} = ${Tr_u.toFixed(2)} hr；基期 T<sub>b</sub> = T<sub>p</sub> + T<sub>r</sub> = ${uh.Tp.toFixed(2)} + ${Tr_u.toFixed(2)} = ${uh.Tb.toFixed(2)} hr（約 2.67 T<sub>p</sub>）。</p>
   <p>(4) 單位洪峰流量（單位有效降雨 R<sub>e</sub> = 10 mm）：Q<sub>p</sub> = 0.208 × A × R<sub>e</sub> / T<sub>p</sub> = 0.208 × ${w.A_km2.toFixed(2)} × 10 / ${uh.Tp.toFixed(2)} = ${uh.unitQp_10mm.toFixed(1)} cms（A 以 km² 計，0.208 為洪峰係數）。</p>
   <p>(5) 設計洪水歷線：${fineUH ? '各時段' : '各小時'}有效降雨 R<sub>e,j</sub> = P<sub>24</sub>(T) × p<sub>j</sub>/100 之有效部分，${effNote}。每個降雨時段分為 ${fineUH ? Math.max(2, Math.round(uh.ds * 10)) : 10} 個子脈衝，各以三角形單位歷線（尖峰 0.208 A /T<sub>p</sub> 每 mm、峰於 T<sub>p</sub>、止於 T<sub>b</sub>）依時間延遲疊加，演算時距 Δt = ${(uh.dt || 0.25).toFixed(2)} hr，Q(t) = ΣΣ R<sub>e,j</sub> × u(t − τ<sub>j,m</sub>)，不再另作洪峰縮放。</p>
-  <p>(6) ${d.targetT} 年重現期驗算：P<sub>24</sub> = ${P24T.toFixed(1)} mm，有效降雨總量 = ${Pe_total.toFixed(1)} mm（${d.CN_val ? 'CN 法' : P24T.toFixed(1) + ' × ' + d.C_coef}）；疊加所得洪峰 Q<sub>p</sub> = <strong>${uh.Qp.toFixed(2)} cms</strong>，發生於第 ${uh.peakTimeHr} 小時；歷線下總體積 ΣQ·Δt = ${volCalc.toExponential(3)} m³，理論逕流體積 A × R<sub>e</sub> = ${volTheo.toExponential(3)} m³（比值 ${(volCalc / volTheo * 100).toFixed(1)}%）。</p>`;
+  <p>(6) ${d.targetT} 年重現期驗算：P<sub>24</sub> = ${P24T.toFixed(1)} mm，有效降雨總量 = ${Pe_total.toFixed(1)} mm（${d.CN_val ? 'CN 法' : '固定損失 φ = ' + d.phi_val + ' mm/hr'}）；疊加所得洪峰 Q<sub>p</sub> = <strong>${uh.Qp.toFixed(2)} cms</strong>，發生於第 ${uh.peakTimeHr} 小時；歷線下總體積 ΣQ·Δt = ${volCalc.toExponential(3)} m³，理論逕流體積 A × R<sub>e</sub> = ${volTheo.toExponential(3)} m³（比值 ${(volCalc / volTheo * 100).toFixed(1)}%）。</p>`;
 
   const appendixFreqHTML = d.stationFreqs ? `
   <h3>附錄　各雨量站個別最大 24 小時暴雨頻率分析成果</h3>
@@ -5688,7 +5689,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </table>
 
   <p><strong>SCS 無因次單位歷線法（比較用）：</strong>依排水計畫書規定之 SCS 無因次單位歷線，T<sub>lag</sub> = 0.6 t<sub>c</sub> = 0.6 × ${w.Tc_hr.toFixed(2)} = ${scs.Tlag.toFixed(2)} hr；T<sub>p</sub> = t<sub>r</sub>/2 + T<sub>lag</sub> = ${scs.D_unit.toFixed(2)}/2 + ${scs.Tlag.toFixed(2)} = ${scs.Tp.toFixed(2)} hr（t<sub>r</sub> 取單位降雨延時 D = 0.135 t<sub>c</sub>）；Q<sub>p</sub> = 0.208 A R<sub>e</sub> / T<sub>p</sub>（R<sub>e</sub> = 10 mm 時為 ${scs.unitQp_10mm.toFixed(1)} cms）；基期 T<sub>b</sub> = 2.67 T<sub>p</sub> = ${scs.Tb.toFixed(2)} hr。以時間比 t/T<sub>p</sub> 與流量比 q/Q<sub>p</sub> 之無因次曲線（附錄表 A-7）轉換為各時刻流量，逐時有效降雨以 10 個子脈衝依時間延遲疊加；曲線下面積為 ${scs.areaRatio.toFixed(3)} T<sub>p</sub>Q<sub>p</sub>（三角形為 1.335）。有效降雨：${effNote}。<span style="color:#b45309;">本表比值係採 USDA NRCS National Engineering Handbook Part 630 之標準座標，水利署排水計畫書附表五原文未能取得核對，正式送審前請與附表五比對。</span></p>
-  <div class="caption">表 8-3 修正三角型與 SCS 無因次單位歷線洪峰流量比較（單位：cms；有效雨量：${d.CN_val ? 'CN = ' + d.CN_val : 'C = ' + d.C_coef}）</div>
+  <div class="caption">表 8-3 修正三角型與 SCS 無因次單位歷線洪峰流量比較（單位：cms；有效雨量：${d.CN_val ? 'CN = ' + d.CN_val : 'φ = ' + d.phi_val + ' mm/hr'}）</div>
   <table><thead><tr><th>方法</th><th>2年</th><th>5年</th><th>10年</th><th>25年</th><th>50年</th><th>100年</th><th>200年</th></tr></thead><tbody>
     <tr><td style="text-align:center;">修正三角型 (△-同)</td>${d.rowTri.map(q => `<td>${q.toFixed(2)}</td>`).join('')}</tr>
     <tr><td style="text-align:center;">SCS 無因次 (S-同)</td>${d.rowScs.map(q => `<td>${q.toFixed(2)}</td>`).join('')}</tr>
@@ -5800,7 +5801,7 @@ function buildExportCSV(distCode, T, uhResult, qRat, qSed, dfMetrics) {
   csv += `選用分布,${distCode},重現期(年),${T},合理化洪峰(cms),${qRat.toFixed(2)},修正三角形歷線洪峰(cms),${uhResult.Qp.toFixed(2)},含砂水流洪峰(cms),${qSed.toFixed(2)},Cd公式,${dfMetrics.method === 'T' ? 'Takahashi 公式' : 'Lien&Tsai 公式'},tanα,${dfMetrics.tanA},Cm,${dfMetrics.Cm},Cd公式原始值,${dfMetrics.CdRaw === null ? '無合理解' : dfMetrics.CdRaw.toFixed(3)},土石流體積濃度Cd(採用),${dfMetrics.Cd.toFixed(3)},土石流尖峰流量Qd=Cm/(Cm-Cd)*Qp(cms),${dfMetrics.Qd.toFixed(2)}\n\n`;
   if (lastReportData) {
     const d0 = lastReportData, ci = d0.basis && d0.basis.convInfo;
-    csv += `採用單位歷線法,${d0.uhMethodLabel},有效雨量方式,${d0.CN_val ? 'CN=' + d0.CN_val : 'C=' + d0.C_coef},三角型洪峰(cms),${d0.triRes.Qp.toFixed(2)},SCS洪峰(cms),${d0.scsRes.Qp.toFixed(2)}\n`;
+    csv += `採用單位歷線法,${d0.uhMethodLabel},有效雨量方式,${d0.CN_val ? 'CN=' + d0.CN_val : 'phi=' + d0.phi_val + 'mm/hr'},三角型洪峰(cms),${d0.triRes.Qp.toFixed(2)},SCS洪峰(cms),${d0.scsRes.Qp.toFixed(2)}\n`;
     if (ci) csv += `一日→24hr換算係數,${ci.label}${ci.auto ? '(自動判定)' : '(手動)'},來源,水利署96年水文業務現代化綜合計畫表3-3\n`;
   }
   csv += "時間(hr),有效雨量Re(mm),清水流流量Q(cms),土石流流量Qd(cms)\n";
@@ -5834,7 +5835,7 @@ document.getElementById('chkWraStations').addEventListener('change', () => {
   if (currentWatershedParams && currentWatershedParams.feature) buildThiessenForWatershed(currentWatershedParams.feature, currentWatershedParams.A_km2);
 });
 initHornerUI(); renderCnRows();
-['input_C', 'input_alpha', 'input_phi', 'chkIdfCalib', 'input_overland_l', 'input_overland_v'].forEach(id => document.getElementById(id).addEventListener('change', runFrequencyAndHydrology));
+['input_C', 'input_alpha', 'input_phi', 'input_overland_l', 'input_overland_v'].forEach(id => document.getElementById(id).addEventListener('change', runFrequencyAndHydrology));
 document.getElementById('chkDebrisStream').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_theta').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_phi').addEventListener('change', runFrequencyAndHydrology);
@@ -5986,7 +5987,7 @@ document.getElementById('chkMultiMode').addEventListener('change', e => {
 function cpRows() { return controlPoints.filter(pt => pt.d); }
 function cpParamSig() {
   const g = id => { const e = document.getElementById(id); return e ? (e.type === 'checkbox' ? String(e.checked) : e.value) : ''; };
-  return ['input_C', 'input_alpha', 'input_CN', 'input_phi', 'chkIdfCalib', 'select_idfSource', 'select_stepMode', 'select_uhMethod', 'returnPeriodSelect', 'distSelect', 'select_dayConv', 'input_overland_l', 'input_overland_v', 'input_gapH', 'input_gapD', 'input_maxHr', 'select_stormType', 'input_chicago_r', 'select_huffQ'].map(g).join(',') + (document.getElementById('chkClean') && document.getElementById('chkClean').checked ? ',1' : ',0') + ',' + JSON.stringify([...OL_KEEP]) + ',' + JSON.stringify([HORNER_CUR.sid, HORNER_CUR.dist, HORNER_CUR.p]);
+  return ['input_C', 'input_alpha', 'input_CN', 'input_phi', 'select_idfSource', 'select_stepMode', 'select_uhMethod', 'returnPeriodSelect', 'distSelect', 'select_dayConv', 'input_overland_l', 'input_overland_v', 'input_gapH', 'input_gapD', 'input_maxHr', 'select_stormType', 'input_chicago_r', 'select_huffQ'].map(g).join(',') + (document.getElementById('chkClean') && document.getElementById('chkClean').checked ? ',1' : ',0') + ',' + JSON.stringify([...OL_KEEP]) + ',' + JSON.stringify([HORNER_CUR.sid, HORNER_CUR.dist, HORNER_CUR.p]);
 }
 const CP_DIST_NAME = { LN2: "Log-Normal II", LN3: "Log-Normal III", PT3: "Pearson III", LP3: "Log-Pearson III", GUMBEL: "Extreme I" };
 const cpGroupOrder = pts => [...pts].sort((a, b) => (a.type === b.type ? 0 : a.type === '主流' ? -1 : 1));
@@ -6141,7 +6142,7 @@ function multiPointReportHTML(pts, mapImgs) {
 ${sharedTxt ? `<p>${sharedTxt}</p>` : ''}
 <p><strong>注意：各控制點之洪峰流量均為各點集水區獨立計算之結果，未進行歷線匯流演算（支流匯入主流處之歷線疊加、洪峰衰減與時間差未予考慮），故各點洪峰不可直接相加或相減。</strong>如需支流匯入後之主流設計流量，須另以歷線演算。</p>
 <h3>二、共同計算參數</h3>
-<p>逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量 = C × 降雨'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+α)；土石流 Q<sub>D</sub> = C<sub>m</sub>/(C<sub>m</sub>−C<sub>d</sub>)·Q<sub>p</sub>（水保手冊），僅於判定為土石流潛勢溪流之控制點列出。</p>
+<p>合理化公式逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量採固定損失 φ = ' + d0.phi_val + ' mm/hr（水保手冊固定值法）'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+α)；土石流 Q<sub>D</sub> = C<sub>m</sub>/(C<sub>m</sub>−C<sub>d</sub>)·Q<sub>p</sub>（水保手冊），僅於判定為土石流潛勢溪流之控制點列出。</p>
 <h3>三、控制點成果合併表</h3>
 ${cpMergedHTML(pts, false)}
 ${detail}
