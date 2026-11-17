@@ -4368,9 +4368,18 @@ function shortStormStepHr(mode, Tc_hr) {
   if (mode === 'MANUAL10') return 1 / 6;
   return handbookD_hr(Tc_hr);   // 預設：依水保手冊 D 表（5～60 分鐘）
 }
-function shortStormPct(T, ds, P_annual, srcObj) {
+// P24（頻率分析之 24 小時雨量）若大於 IDF 公式 24 小時雨量（k = P24/D(24) > 1），
+// 短延時（≤ 6 hr）雨量直接採 IDF 公式，超出部分以對數時間內插分配至 24 小時，使 24 小時總雨量 = P24，
+// 避免正規化後短延時雨量被放大；k ≤ 1 時維持原作法（雨量 = k × IDF，可重現規劃報告）。
+function shortStormPct(T, ds, P_annual, srcObj, P24) {
   const n = Math.round(24 / ds);
-  const D = t => t <= 0 ? 0 : idfAt(T, t, P_annual, srcObj).I * t;
+  const D0 = t => t <= 0 ? 0 : idfAt(T, t, P_annual, srcObj).I * t;
+  const k = (P24 > 0 && D0(24) > 0) ? P24 / D0(24) : 1, TREF = 6;
+  const D = (k > 1 && isFinite(k)) ? (t => {
+    if (t <= 0) return 0;
+    const g = t <= TREF ? 0 : Math.log(t / TREF) / Math.log(24 / TREF);
+    return D0(t) * (1 + (k - 1) * g);
+  }) : D0;
   const inc = Array.from({ length: n }, (_, k) => Math.max(0, D((k + 1) * ds) - D(k * ds)));
   const arr = placeAltBlock(inc), tot = arr.reduce((a, b) => a + b, 0) || 1;
   return arr.map(v => v * 100 / tot);
@@ -4441,10 +4450,13 @@ function runFrequencyAndHydrology() {
   // 降雨強度來源（Horner／無因次）與短延時交替區塊雨型（各重現期各自由 I(t) 推得，時距 10 分鐘或依 Tc）
   renderHornerSuggest(useList);
   const idfSrc = getIdfSource();
+  const freq24 = analyzeStandardFrequency(sample24);
+  const userChoice = document.getElementById('distSelect').value;
+  const selectedCode = userChoice === "AUTO" ? ((isMultiMode() && !!activePointId && !!multiShared && multiShared.dist) ? multiShared.dist : freq24.bestCode) : userChoice;
   const rz0 = calcRzihaTc(currentWatershedParams.L_m, currentWatershedParams.H_m);
   const targetT0 = parseInt(document.getElementById('returnPeriodSelect').value);
   const dsShort = shortStormStepHr((document.getElementById('select_stepMode') || {}).value, rz0.Tc_hr);
-  const shortFineFn = T => ({ ds: dsShort, pct: shortStormPct(T, dsShort, P_ann0, idfSrc) });
+  const shortFineFn = T => ({ ds: dsShort, pct: shortStormPct(T, dsShort, P_ann0, idfSrc, freq24.results[selectedCode].quantiles[T]) });
   const isShortStorm = stormPrm.type === "HORNER10";
   const idfLabel = idfSrc.src === 'HORNER' ? `水利署 Horner 公式（${idfSrc.name}站，${HORNER_DIST_NAME[idfSrc.dist]}）` : '本工具無因次降雨強度公式';
   if (isShortStorm) {
@@ -4472,9 +4484,6 @@ function runFrequencyAndHydrology() {
     }
   }
 
-  const freq24 = analyzeStandardFrequency(sample24);
-  const userChoice = document.getElementById('distSelect').value;
-  const selectedCode = userChoice === "AUTO" ? ((multiActive && multiShared.dist) ? multiShared.dist : freq24.bestCode) : userChoice;
   const targetT = parseInt(document.getElementById('returnPeriodSelect').value);
   const stationFreqs = computeStationFrequencies(useList, basis.convInfo);
   {
