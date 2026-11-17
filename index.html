@@ -340,6 +340,7 @@
       <div style="font-size:11px; color:#94a3b8; line-height:1.5;">只影響單位歷線法之洪峰（合理化公式不受雨型影響）。報告會並列各雨型之洪峰比較。</div>
       <div id="stormTypeNote" style="font-size:11px; color:#7dd3fc; line-height:1.5;"></div>
     </div>
+    <div style="font-size:11.5px; margin:6px 0;"><label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chkIdfCalib" style="width:auto; margin:0;" /> 合理化公式之降雨強度依頻率分析 P24 校正（預設不校正；Horner 外推 24 hr 時不建議）</label></div>
     <div style="border:1px solid #334155; border-radius:6px; padding:6px; margin:6px 0;" id="idfSourceBox">
       <label>降雨強度公式來源（合理化公式與短延時雨型使用）</label>
       <select id="select_idfSource">
@@ -401,11 +402,16 @@
           <option value="SCS">SCS 無因次單位歷線</option>
         </select>
       </div>
-      <div style="grid-column: span 2;">
-        <label>CN 值（選填；留空＝有效雨量 = C × 降雨）</label>
+      <div style="grid-column: span 1;">
+        <label>CN 值（選填）</label>
         <input type="number" id="input_CN" value="" placeholder="留空不啟用" min="25" max="100" step="0.1" />
       </div>
+      <div style="grid-column: span 1;">
+        <label>固定損失 φ (mm/hr)</label>
+        <input type="number" id="input_phi" value="" placeholder="留空不啟用" min="0" max="50" step="0.5" />
+      </div>
     </div>
+    <div style="font-size:11px; color:#94a3b8; line-height:1.5;">單位歷線之有效雨量：填 φ 時用「固定損失」（R<sub>e,j</sub> = max(0, P<sub>j</sub> − φ·Δt)，如東卯溪原報告 4 mm/hr）；否則填 CN 用 SCS 法；兩者皆留空則 R<sub>e</sub> = C × P。</div>
     <div style="font-size:11px; color:#94a3b8; line-height:1.5; margin-top:3px;">
       ※ 預設以逕流係數 C 計算有效雨量（Re = C × P）。CN 法需依土壤水文分類、土地利用與前期含水量（AMC）判定，本工具無此資料，故僅提供手動輸入：填入 CN 後，歷線演算改用 SCS 逕流公式 S = 25400/CN − 254、Ia = 0.2S、Pe = (P − Ia)² / (P − Ia + S)（逐時累積雨量計算），並同時影響兩種單位歷線；合理化公式仍使用 C。清空 CN 即恢復 C 法。
     </div>
@@ -3372,6 +3378,13 @@ function calcDimensionlessIntensity(P_annual_mm, Tc_hr, T_yr) {
 // 有效降雨：C 法（Re = C × P）或手動 CN 法（SCS 逕流公式，逐時累積雨量）
 function effectiveHourlyRain(P24_mm, stormPct24, C_runoff, CN) {
   const hourlyP = stormPct24.map(pct => P24_mm * (pct / 100));
+  const phiEl = (typeof document !== 'undefined') ? document.getElementById('input_phi') : null;
+  const phi = phiEl ? parseFloat(phiEl.value) : NaN;
+  if (phi > 0) {
+    const dsH = 24 / stormPct24.length;
+    const hourlyPe = hourlyP.map(p => Math.max(0, p - phi * dsH));
+    return { hourlyP, hourlyPe, PeTotal: hourlyPe.reduce((a, b) => a + b, 0), mode: "PHI", phi };
+  }
   if (CN && CN >= 25 && CN <= 100) {
     const S = 25400 / CN - 254, Ia = 0.2 * S;
     let cum = 0, prevPe = 0;
@@ -4527,12 +4540,13 @@ function runFrequencyAndHydrology() {
   let triRes = null, scsRes = null, targetRatQp = 0, p24Target = 0;
 
   // 強度校正：合理化公式的 I 與單位歷線之 P24 同源 —— 以頻率分析 P24(T) ÷ 強度公式反推 24 小時雨量 作為校正係數
+  const useCalib = !!(document.getElementById('chkIdfCalib') || {}).checked;
   const idfCalib = RETURN_PERIODS.map(T => {
     const raw = idfRows.find(x => x.T === T).I;
     const depth24 = idfAt(T, 24, P_annual, idfSrc).I * 24;
     const p24 = freq24.results[selectedCode].quantiles[T];
     const k = (depth24 > 0 && p24 > 0) ? p24 / depth24 : 1;
-    return { T, raw, depth24, p24, k, adj: raw * k };
+    return { T, raw, depth24, p24, k, adj: useCalib ? raw * k : raw };
   });
   RETURN_PERIODS.forEach((T, ti) => {
     const iT = idfCalib[ti].adj;
@@ -4634,7 +4648,7 @@ function runFrequencyAndHydrology() {
     C_coef,
     alphaPct,
     stormPattern24,
-    rowIntensities, idfCalib,
+    rowIntensities, idfCalib, useCalib,
     rowRat,
     stationFreqs,
     rowTri,
@@ -5396,8 +5410,8 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   const tMin = w.Tc_hr * 60;
 
   const calibHTML = `
-  <p><strong>降雨強度與頻率分析雨量之一致性校正：</strong>強度公式（區域經驗式）與本集水區 24 小時暴雨頻率分析所得之 P<sub>24</sub> 係不同來源，兩者隨重現期之成長率不同，若直接使用，合理化公式與單位歷線會採用不同的雨量。故以 k = P<sub>24</sub>(T) ÷ 強度公式反推 24 小時雨量 [I(T, 24 hr) × 24] 校正 t<sub>c</sub> 之降雨強度：I<sub>採用</sub> = k × I(T, t<sub>c</sub>)，使兩方法之雨量基礎一致。</p>
-  <div class="caption">表 6-2 降雨強度一致性檢核與校正</div>
+  <p><strong>降雨強度與頻率分析雨量之一致性檢核：</strong>強度公式（區域經驗式）與本集水區 24 小時暴雨頻率分析所得之 P<sub>24</sub> 係不同來源。下表以 k = P<sub>24</sub>(T) ÷ 強度公式反推 24 小時雨量 [I(T, 24 hr) × 24] 檢核兩者差距。${d.useCalib ? '本次<strong>已依 k 校正</strong> t<sub>c</sub> 之降雨強度：I<sub>採用</sub> = k × I(T, t<sub>c</sub>)。' : '本次<strong>未校正</strong>（I<sub>採用</sub> = I(T, t<sub>c</sub>)），k 僅供檢核；Horner 公式僅適用短延時，外推至 24 小時時 k 常明顯偏離 1，不宜直接作為校正依據。'}</p>
+  <div class="caption">表 6-2 降雨強度一致性檢核</div>
   <table><thead><tr><th>T (年)</th><th>公式反推 24 hr 雨量 (mm)</th><th>頻率分析 P<sub>24</sub> (mm)</th><th>差距</th><th>校正係數 k</th><th>I(t<sub>c</sub>) 原值 (mm/hr)</th><th>I(t<sub>c</sub>) 採用值 (mm/hr)</th></tr></thead><tbody>${d.idfCalib.map(c => { const dv = (c.k - 1) * 100; return `<tr${Math.abs(dv) > 10 ? ' style="background:#fef3c7;"' : ''}><td style="text-align:center;">${c.T}</td><td>${c.depth24.toFixed(1)}</td><td>${c.p24.toFixed(1)}</td><td>${dv >= 0 ? '+' : ''}${dv.toFixed(1)}%</td><td>${c.k.toFixed(3)}</td><td>${c.raw.toFixed(2)}</td><td><strong>${c.adj.toFixed(2)}</strong></td></tr>`; }).join('')}</tbody></table>
   ${d.idfCalib.some(c => Math.abs(c.k - 1) > 0.10) ? '<p style="color:#b45309;">註：標示底色者，強度公式與頻率分析 P<sub>24</sub> 差距超過 10%，建議確認雨量站、年平均雨量或 Horner 測站之選用是否合理。</p>' : ''}`;
   const idfRows = [2, 5, 10, 25, 50, 100, 200].map((T, i) => {
@@ -5427,7 +5441,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   const uh = d.triRes;
   const scs = d.scsRes;
   const cnTable = d.cnApplied ? `<div class="caption">表 8-0 CN 值查表加權（出流管制技術手冊 109.05 表 4-2、4-3、4-4，AMC Ⅱ）</div><table><thead><tr><th>土地利用</th><th>土壤</th><th>面積比例 (%)</th><th>CN</th></tr></thead><tbody>${d.cnApplied.detail.map(x => `<tr><td style="text-align:left;">${x.label}</td><td style="text-align:center;">${x.soil}</td><td>${x.pct}</td><td>${x.cn}</td></tr>`).join('')}<tr><td colspan="3" style="text-align:right;">面積加權 CN${d.cnApplied.capped ? '（依手冊 4.4 開發前 CN > 70 以 70 計）' : ''}</td><td><strong>${d.cnApplied.cn}</strong></td></tr></tbody></table>` : '';
-  const effNote = d.CN_val ? `採${d.cnApplied ? '手冊查表加權之' : '手動輸入之'} CN = ${d.CN_val}（S = 25400/CN − 254 = ${uh.eff.S.toFixed(1)} mm，Ia = 0.2S = ${uh.eff.Ia.toFixed(1)} mm，Pe = (P − Ia)² / (P − Ia + S)，逐時累積雨量計算）` : `採逕流係數 C = ${d.C_coef}（Re = C × P）`;
+  const effNote = uh.eff.mode === 'PHI' ? `採固定損失 φ = ${uh.eff.phi} mm/hr（R<sub>e,j</sub> = max(0, P<sub>j</sub> − φ × Δt)，Δt 為雨型時距）` : d.CN_val ? `採${d.cnApplied ? '手冊查表加權之' : '手動輸入之'} CN = ${d.CN_val}（S = 25400/CN − 254 = ${uh.eff.S.toFixed(1)} mm，Ia = 0.2S = ${uh.eff.Ia.toFixed(1)} mm，Pe = (P − Ia)² / (P − Ia + S)，逐時累積雨量計算）` : `採逕流係數 C = ${d.C_coef}（Re = C × P）`;
   const fineUH = !!uh.fine;
   const D_u = fineUH ? uh.ds : handbookD_hr(w.Tc_hr);
   const Tr_u = +(1.67 * uh.Tp).toFixed(2);
@@ -5807,7 +5821,7 @@ document.getElementById('chkWraStations').addEventListener('change', () => {
   if (currentWatershedParams && currentWatershedParams.feature) buildThiessenForWatershed(currentWatershedParams.feature, currentWatershedParams.A_km2);
 });
 initHornerUI(); renderCnRows();
-['input_C', 'input_alpha', 'input_overland_l', 'input_overland_v'].forEach(id => document.getElementById(id).addEventListener('change', runFrequencyAndHydrology));
+['input_C', 'input_alpha', 'input_phi', 'chkIdfCalib', 'input_overland_l', 'input_overland_v'].forEach(id => document.getElementById(id).addEventListener('change', runFrequencyAndHydrology));
 document.getElementById('chkDebrisStream').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_theta').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_phi').addEventListener('change', runFrequencyAndHydrology);
@@ -5957,8 +5971,8 @@ document.getElementById('chkMultiMode').addEventListener('change', e => {
 
 function cpRows() { return controlPoints.filter(pt => pt.d); }
 function cpParamSig() {
-  const g = id => { const e = document.getElementById(id); return e ? e.value : ''; };
-  return ['input_C', 'input_alpha', 'input_CN', 'select_idfSource', 'select_stepMode', 'select_uhMethod', 'returnPeriodSelect', 'distSelect', 'select_dayConv', 'input_overland_l', 'input_overland_v', 'input_gapH', 'input_gapD', 'input_maxHr', 'select_stormType', 'input_chicago_r', 'select_huffQ'].map(g).join(',') + (document.getElementById('chkClean') && document.getElementById('chkClean').checked ? ',1' : ',0') + ',' + JSON.stringify([...OL_KEEP]) + ',' + JSON.stringify([HORNER_CUR.sid, HORNER_CUR.dist, HORNER_CUR.p]);
+  const g = id => { const e = document.getElementById(id); return e ? (e.type === 'checkbox' ? String(e.checked) : e.value) : ''; };
+  return ['input_C', 'input_alpha', 'input_CN', 'input_phi', 'chkIdfCalib', 'select_idfSource', 'select_stepMode', 'select_uhMethod', 'returnPeriodSelect', 'distSelect', 'select_dayConv', 'input_overland_l', 'input_overland_v', 'input_gapH', 'input_gapD', 'input_maxHr', 'select_stormType', 'input_chicago_r', 'select_huffQ'].map(g).join(',') + (document.getElementById('chkClean') && document.getElementById('chkClean').checked ? ',1' : ',0') + ',' + JSON.stringify([...OL_KEEP]) + ',' + JSON.stringify([HORNER_CUR.sid, HORNER_CUR.dist, HORNER_CUR.p]);
 }
 const CP_DIST_NAME = { LN2: "Log-Normal II", LN3: "Log-Normal III", PT3: "Pearson III", LP3: "Log-Pearson III", GUMBEL: "Extreme I" };
 const cpGroupOrder = pts => [...pts].sort((a, b) => (a.type === b.type ? 0 : a.type === '主流' ? -1 : 1));
