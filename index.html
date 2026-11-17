@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="referrer" content="origin">
-  <title>集水區水文分析・徐昇面積・單位歷線・土石流潛勢溪流演算系統</title>
+  <title>集水區水文分析系統・徐昇面積・單位歷線</title>
   <!-- Leaflet & Leaflet.Draw -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -530,10 +530,15 @@
     </div>
     <div class="grid-2">
       <button id="btnRunHydrology" class="success" style="margin-bottom:0;">重新執行水文與土石流演算</button>
-      <button id="btnGenerateReport" class="report-btn" style="margin-bottom:0;">📄 產出完整水文與土砂分析報告</button>
+      <button id="btnGenerateReport" class="report-btn" style="margin-bottom:0;">📄 產出集水區水文分析報告</button>
     </div>
     <div class="grid-2" style="margin-top:8px;">
       <button id="btnExportCSV2" class="secondary" style="margin-bottom:0;">下載 CSV 計算書</button>
+    </div>
+    <div style="margin-top:8px; display:flex; align-items:center; gap:8px; font-size:12.5px; color:#cbd5e1;">
+      <span style="white-space:nowrap;">報告圖雨量站點位不透明度</span>
+      <input type="range" id="rngStAlpha" min="0" max="100" step="5" value="60" style="margin:0; flex:1;" />
+      <span id="stAlphaVal" style="width:38px; text-align:right;">60%</span>
     </div>
   </div>
 </div>
@@ -4717,10 +4722,73 @@ function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics, off) {
 }
 
 // ============================================================================
-// 8. 產出獨立專業《集水區水文、水理及土砂分析報告》(含真實等高線地形圖底圖 + 控制點座標 + 100%徐昇圖)
+// 8. 產出獨立專業《集水區水文分析報告》(含真實等高線地形圖底圖 + 控制點座標 + 100%徐昇圖)
 // ============================================================================
 function lon2tileFloat(lon, z) { return (lon + 180) / 360 * Math.pow(2, z); }
 function lat2tileFloat(lat, z) { return (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z); }
+
+
+// ---- 報告頁「一鍵下載 PDF」：以區塊為單位轉成圖片後排入 A4（避免把圖表從中間切斷）----
+const PDF_LIBS = '<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"><\/script><script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"><\/script>';
+async function reportPdfMain(fileName) {
+  const btn = document.getElementById('btnPdf');
+  const old = btn.textContent;
+  if (!window.html2canvas || !window.jspdf) { alert('PDF 元件載入失敗，請確認網路連線後重新整理本頁；或改用「列印」另存 PDF。'); return; }
+  btn.disabled = true;
+  try {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+    const PW = 210, PH = 297, M = 12, CW = PW - 2 * M, BOT = PH - M - 4, CH = BOT - M, GAP = 1.6, SC = 2;
+    const cs = getComputedStyle(document.body);
+    const innerW = document.body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const mm = CW / innerW;
+    const els = Array.from(document.body.children).filter(e => !e.classList.contains('toolbar') && e.tagName !== 'SCRIPT' && e.offsetHeight > 0);
+    const items = [];
+    for (let i = 0; i < els.length; i++) {
+      btn.textContent = '產生中 ' + (i + 1) + '/' + els.length + '…';
+      const c = await html2canvas(els[i], { scale: SC, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      items.push({ el: els[i], c, w: Math.min(CW, c.width / SC * mm), h: c.height / SC * mm });
+      await new Promise(r => setTimeout(r, 0));
+    }
+    let y = M, first = true;
+    const newPage = () => { pdf.addPage(); y = M; };
+    items.forEach((it, i) => {
+      const tag = it.el.tagName, isHead = /^H[1-3]$/.test(tag) || it.el.classList.contains('caption');
+      const nxt = items[i + 1];
+      const need = it.h + GAP + (isHead && nxt ? Math.min(nxt.h, 45) : 0);
+      if (!first && y > M && y + need > BOT) newPage();
+      first = false;
+      if (it.h <= CH) {
+        pdf.addImage(it.c.toDataURL('image/jpeg', 0.93), 'JPEG', M, y, it.w, it.h);
+        y += it.h + GAP;
+      } else {
+        const pxPerMm = it.c.height / it.h;
+        let done = 0;
+        while (done < it.h - 0.01) {
+          if (BOT - y < 25) newPage();
+          const take = Math.min(it.h - done, BOT - y);
+          const sl = document.createElement('canvas');
+          sl.width = it.c.width; sl.height = Math.max(1, Math.round(take * pxPerMm));
+          const g = sl.getContext('2d');
+          g.fillStyle = '#fff'; g.fillRect(0, 0, sl.width, sl.height);
+          g.drawImage(it.c, 0, Math.round(done * pxPerMm), it.c.width, sl.height, 0, 0, sl.width, sl.height);
+          pdf.addImage(sl.toDataURL('image/jpeg', 0.93), 'JPEG', M, y, it.w, take);
+          done += take; y += take + GAP;
+          if (done < it.h - 0.01) newPage();
+        }
+      }
+    });
+    const N = pdf.getNumberOfPages();
+    for (let p = 1; p <= N; p++) { pdf.setPage(p); pdf.setFontSize(9); pdf.setTextColor(100); pdf.text(p + ' / ' + N, PW / 2, PH - 6, { align: 'center' }); }
+    pdf.save(fileName);
+  } catch (e) {
+    console.error(e);
+    alert('產生 PDF 失敗：' + (e && e.message ? e.message : e) + '\n可改用「列印」另存 PDF。');
+  } finally { btn.disabled = false; btn.textContent = old; }
+}
+function pdfBlockHTML(fileName) {
+  return PDF_LIBS + '<script>' + reportPdfMain.toString() + '<\/script><script>window.__PDFNAME=' + JSON.stringify(fileName) + ';<\/script>';
+}
 
 async function renderWatershedMapImageForReport(d) {
   const cvs = document.createElement('canvas');
@@ -4889,6 +4957,7 @@ async function renderWatershedMapImageForReport(d) {
   }
 
   // 4. 繪製集水區控制點 (出水口) 及其 TWD97 座標標籤
+  const obstacles = [];   // 已佔用的標籤／點位矩形，供雨量站標籤避讓
   if (d.watershed.outletLatLon) {
     const [ox, oy] = toXY(d.watershed.outletLatLon[1], d.watershed.outletLatLon[0]);
     const twd = d.watershed.outletTWD97;
@@ -4907,26 +4976,78 @@ async function renderWatershedMapImageForReport(d) {
     ctx.strokeRect(lx - 4, ly - 14, tw + 8, 20);
     ctx.fillStyle = "#991b1b"; ctx.textAlign = "left";
     ctx.fillText(lbl, lx, ly);
+    obstacles.push({ x: lx - 4, y: ly - 14, w: tw + 8, h: 20 }, { x: ox - 9, y: oy - 9, w: 18, h: 18 });
   }
 
-  // 5. 繪製採用雨量站點位與權重標籤
-  activeThiessen.forEach(st => {
-    const [sx, sy] = toXY(st.lon, st.lat);
-    ctx.beginPath();
-    ctx.arc(sx, sy, 6, 0, Math.PI * 2);
-    ctx.fillStyle = "#ea580c"; ctx.fill();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
-
-    const stLbl = `${st.name}${st.withdrawn ? '(撤銷站)' : ''}站 (${st.areaHa.toFixed(1)}ha, ${(st.weight * 100).toFixed(1)}%)`;
+  // 5. 繪製採用雨量站點位與站名標籤（圓點採徐昇區同色；標籤避開集水區；透明度可調）
+  {
+    const alphaEl = document.getElementById('rngStAlpha');
+    const alpha = Math.min(1, Math.max(0, (alphaEl ? parseFloat(alphaEl.value) : 60) / 100));
+    const wsRings = [];
+    if (d.watershed.feature) {
+      const g0 = d.watershed.feature.geometry;
+      (g0.type === "MultiPolygon" ? g0.coordinates : [g0.coordinates]).forEach(poly => wsRings.push(poly[0].map(([lo, la]) => toXY(lo, la))));
+    }
+    const inWs = (x, y) => wsRings.some(r => {
+      let c = false;
+      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+        if (((r[i][1] > y) !== (r[j][1] > y)) && (x < (r[j][0] - r[i][0]) * (y - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0])) c = !c;
+      }
+      return c;
+    });
+    const rectHitsWs = R => {
+      for (let yy = R.y; yy <= R.y + R.h + 0.1; yy += 5) for (let xx = R.x; xx <= R.x + R.w + 0.1; xx += 6) if (inWs(xx, yy)) return true;
+      return false;
+    };
+    const rectHit = (A, B) => A.x < B.x + B.w && B.x < A.x + A.w && A.y < B.y + B.h && B.y < A.y + A.h;
+    const inPlot = R => R.x >= plotX + 2 && R.y >= plotY + 2 && R.x + R.w <= plotX + plotW - 2 && R.y + R.h <= plotY + plotH - 2;
+    const stCols = ["#d97706", "#7c3aed", "#db2777", "#059669", "#0891b2"];
+    const stPts = activeThiessen.map((st, idx) => {
+      const [sx, sy] = toXY(st.lon, st.lat);
+      return { st, sx, sy, col: stCols[idx % stCols.length], txt: `${st.name}${st.withdrawn ? '(撤銷站)' : ''}站` };
+    });
+    stPts.forEach(q => obstacles.push({ x: q.sx - 7, y: q.sy - 7, w: 14, h: 14 }));
     ctx.font = "bold 11.5px Microsoft JhengHei";
-    const stW = ctx.measureText(stLbl).width;
-    const bx = Math.min(plotX + plotW - stW - 10, Math.max(plotX + 6, sx + 9));
-    const by = Math.min(plotY + plotH - 8, Math.max(plotY + 18, sy + 4));
-    ctx.fillStyle = "rgba(255,255,255,0.88)";
-    ctx.fillRect(bx - 3, by - 13, stW + 6, 18);
-    ctx.fillStyle = "#0f172a"; ctx.textAlign = "left";
-    ctx.fillText(stLbl, bx, by);
-  });
+    const dirs = [[1, 0], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 1], [-1, -1], [-1, 1]];
+    const dists = [12, 26, 44, 64, 88, 116];
+    stPts.forEach(q => {
+      const w = ctx.measureText(q.txt).width + 8, h = 18;
+      let best = null, fallback = null;
+      outer: for (const dd of dists) for (const [ux, uy] of dirs) {
+        const cx = q.sx + ux * (dd + Math.abs(ux) * w / 2), cy = q.sy + uy * (dd + Math.abs(uy) * h / 2);
+        const R = { x: cx - w / 2, y: cy - h / 2, w, h };
+        if (!inPlot(R) || obstacles.some(o => rectHit(R, o))) continue;
+        if (!fallback) fallback = { R, dd };
+        if (!rectHitsWs(R)) { best = { R, dd }; break outer; }
+      }
+      const pick = best || fallback || { R: { x: Math.min(plotX + plotW - w - 4, q.sx + 12), y: Math.max(plotY + 4, q.sy - h / 2), w, h }, dd: 12 };
+      const R = pick.R;
+      obstacles.push(R);
+      // 引線（標籤離點位較遠時）
+      if (pick.dd > 14) {
+        const ex = Math.min(R.x + R.w, Math.max(R.x, q.sx)), ey = Math.min(R.y + R.h, Math.max(R.y, q.sy));
+        ctx.save(); ctx.globalAlpha = Math.max(0.35, alpha);
+        ctx.strokeStyle = q.col; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(q.sx, q.sy); ctx.lineTo(ex, ey); ctx.stroke(); ctx.restore();
+      }
+      // 標籤底色（半透明）＋文字
+      ctx.save(); ctx.globalAlpha = alpha * 0.9;
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(R.x, R.y, R.w, R.h);
+      ctx.strokeStyle = q.col; ctx.lineWidth = 1.2; ctx.strokeRect(R.x, R.y, R.w, R.h);
+      ctx.restore();
+      ctx.save(); ctx.globalAlpha = Math.max(0.85, alpha);
+      ctx.fillStyle = "#0f172a"; ctx.textAlign = "left"; ctx.fillText(q.txt, R.x + 4, R.y + 13);
+      ctx.restore();
+    });
+    // 圓點（徐昇區同色、半透明）
+    stPts.forEach(q => {
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.beginPath(); ctx.arc(q.sx, q.sy, 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = q.col; ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.restore();
+    });
+  }
 
   ctx.restore();
 
@@ -5075,7 +5196,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   const stormImgUrl = renderStormPatternImageForReport(d.stormPattern24, d.targetT);
   let hydroImgUrl = "";
   try { hydroImgUrl = drawHydroReportImage(d.targetUhRes, d.targetT, d.dfMetrics); } catch (e) { console.error(e); }
-  setStatus("✅ 集水區水文、水理及土砂分析報告已開啟於新分頁！");
+  setStatus("✅ 集水區水文分析報告已開啟於新分頁！");
 
   const halfLen = Math.ceil(d.amsYears.length / 2);
   let table2Rows = "";
@@ -5230,7 +5351,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>集水區水文、水理及土砂分析報告</title>
+  <title>集水區水文分析報告</title>
   <style>
     body { font-family: "DFKai-SB", "BiauKai", "PMingLiU", "Microsoft JhengHei", serif; color: #111; max-width: 920px; margin: 20px auto; padding: 20px 40px; line-height: 1.75; }
     h1, h2, h3 { text-align: left; color: #000; }
@@ -5251,11 +5372,11 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 </head>
 <body>
   <div class="toolbar">
-    <span>📄 <strong>集水區水文、水理及土砂分析報告（含等高線地形圖與控制點座標）</strong> — 面積 A = ${w.A_ha.toFixed(1)} ha</span>
-    <button onclick="window.print()">🖨️ 直接列印 / 另存 PDF</button>
+    <span>📄 <strong>集水區水文分析報告（含等高線地形圖與控制點座標）</strong> — 面積 A = ${w.A_ha.toFixed(1)} ha</span>
+    <span><button id="btnPdf" onclick="reportPdfMain(window.__PDFNAME)">⬇ 下載 PDF</button> <button onclick="window.print()" style="background:#475569;">🖨️ 列印</button></span>
   </div>
 
-  <h1>集水區水文、水理及土砂分析報告</h1>
+  <h1>集水區水文分析報告</h1>
 
   <h3>一、水文分析原則與流程</h3>
   <p>水文分析演算是集水區治理規劃過程中相關設計參數取得的主要依據。依水土保持技術規範規定，山坡地集水區系統之洪峰流量估算，若有實測資料時，其逕流量得採用單位歷線分析；若無實測資料時，得採用合理化公式計算，惟其較適用於面積一千公頃（1,000 ha）以內者，大於 1,000 ha 時改以修正三角型單位歷線進行洪水量演算並分析成果；其完整分析流程如圖 1 所示。</p>
@@ -5283,7 +5404,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
       <line x1="400" y1="73" x2="430" y2="73" stroke="#1e293b" stroke-width="2" marker-end="url(#arrow)"/>
 
       <rect x="430" y="25" width="155" height="96" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
-      <text x="507" y="47" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">洪峰流量與土砂模式</text>
+      <text x="507" y="47" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">洪峰流量演算</text>
       <text x="507" y="67" text-anchor="middle" font-size="11.5" fill="#166534">• 合理化公式 (&lt;1000ha)</text>
       <text x="507" y="85" text-anchor="middle" font-size="11.5" fill="#166534">• 三角型歷線 (≥1000ha)</text>
       <text x="507" y="103" text-anchor="middle" font-size="11.5" fill="#991b1b">• 含砂水流 / 土石流流量</text>
@@ -5292,7 +5413,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
       <ellipse cx="672" cy="73" rx="55" ry="26" fill="#fde047" stroke="#ca8a04" stroke-width="2"/>
       <text x="672" y="78" text-anchor="middle" font-size="14" font-weight="bold" fill="#0f172a">評估選定</text>
     </svg>
-    <div class="fig-caption">圖 1 集水區水文、水理及土砂分析步驟流程圖</div>
+    <div class="fig-caption">圖 1 集水區水文分析步驟流程圖</div>
   </div>
 
   <h3>二、集水區控制點位置、雨量站擇定與徐昇面積權重</h3>
@@ -5529,6 +5650,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </table>
   ${appendixHTML}
   ${appendixFreqHTML}
+${pdfBlockHTML(`集水區水文分析報告_${new Date().toISOString().slice(0,10)}.pdf`)}
 </body>
 </html>
   `;
@@ -5540,7 +5662,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
 function buildExportCSV(distCode, T, uhResult, qRat, qSed, dfMetrics) {
   const twd = currentWatershedParams.outletTWD97;
-  let csv = "\uFEFF集水區水文、水理及土石流分析計算書\n";
+  let csv = "\uFEFF集水區水文分析計算書\n";
   csv += `控制點TWD97_X,${twd.x},控制點TWD97_Y,${twd.y},控制點緯度,${twd.lat},控制點經度,${twd.lon}\n`;
   csv += `集水面積 A (ha),${currentWatershedParams.A_ha.toFixed(2)},流路長 L (m),${currentWatershedParams.L_m.toFixed(1)},高程差 H (m),${currentWatershedParams.H_m.toFixed(1)},集流時間 Tc (hr),${currentWatershedParams.Tc_hr.toFixed(2)}\n`;
   csv += `選用分布,${distCode},重現期(年),${T},合理化洪峰(cms),${qRat.toFixed(2)},修正三角形歷線洪峰(cms),${uhResult.Qp.toFixed(2)},含砂水流洪峰(cms),${qSed.toFixed(2)},Cd公式,${dfMetrics.method === 'T' ? 'Takahashi 公式' : 'Lien&Tsai 公式'},tanα,${dfMetrics.tanA},Cm,${dfMetrics.Cm},Cd公式原始值,${dfMetrics.CdRaw === null ? '無合理解' : dfMetrics.CdRaw.toFixed(3)},土石流體積濃度Cd(採用),${dfMetrics.Cd.toFixed(3)},土石流尖峰流量Qd=Cm/(Cm-Cd)*Qp(cms),${dfMetrics.Qd.toFixed(2)}\n\n`;
@@ -5563,11 +5685,12 @@ document.getElementById('btnExportCSV').addEventListener('click', () => {
   const blob = new Blob([lastHydroReportCSV], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `集水區水文與土石流計算書_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `集水區水文分析計算書_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
 });
 
 document.getElementById('btnRunHydrology').addEventListener('click', runFrequencyAndHydrology);
+document.getElementById('rngStAlpha').addEventListener('input', e => { document.getElementById('stAlphaVal').textContent = e.target.value + '%'; });
 document.getElementById('returnPeriodSelect').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('distSelect').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('select_uhMethod').addEventListener('change', runFrequencyAndHydrology);
@@ -5877,7 +6000,7 @@ function multiPointReportHTML(pts, mapImgs) {
   }).join('');
   const sharedTxt = cpSharedText(pts);
   return `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>多控制點洪峰流量彙整報告</title><style>${CP_REPORT_CSS}</style></head><body>
-<div class="toolbar"><span>📄 <strong>多控制點洪峰流量彙整報告</strong>（${pts.length} 點）</span><button onclick="window.print()">🖨️ 列印 / 另存 PDF</button></div>
+<div class="toolbar"><span>📄 <strong>多控制點洪峰流量彙整報告</strong>（${pts.length} 點）</span><span><button id="btnPdf" onclick="reportPdfMain(window.__PDFNAME)">⬇ 下載 PDF</button> <button onclick="window.print()" style="background:#475569;">🖨️ 列印</button></span></div>
 <h1>多控制點洪峰流量彙整報告</h1>
 <h3>一、分析範圍與方法</h3>
 <p>本報告於主流及支流上手動選定 ${pts.length} 個控制點，各控制點依 DEM 自動回溯劃設集水區，並各自以選用雨量站之徐昇面積權重、CODiS 雨量資料進行最大 24 小時暴雨頻率分析（LN2、LN3、PT3、LP3、EV1 五種分布，卡方檢定與標準誤差評估），推求設計雨量與洪峰流量。為使全流域一致，<strong>各控制點採用同一機率分布，並共用同一雨型</strong>。集水面積小於 1,000 ha 者採合理化公式配合無因次降雨強度，大於或等於 1,000 ha 者採${d0.uhMethodLabel}配合同位序雨型。</p>
@@ -5888,6 +6011,7 @@ ${sharedTxt ? `<p>${sharedTxt}</p>` : ''}
 <h3>三、控制點成果合併表</h3>
 ${cpMergedHTML(pts, false)}
 ${detail}
+${pdfBlockHTML(`多控制點洪峰流量彙整報告_${new Date().toISOString().slice(0,10)}.pdf`)}
 </body></html>`;
 }
 
