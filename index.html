@@ -317,7 +317,7 @@
     <div style="border:1px solid #334155; border-radius:6px; padding:6px; margin:6px 0;">
       <label>雨型（24 小時時間分配）</label>
       <select id="select_stormType">
-        <option value="AUTO" selected>自動（t<sub>c</sub> &lt; 1 hr 用短延時 Horner／交替區塊；否則同位序法）</option>
+        <option value="AUTO" selected>自動（Horner 交替區塊；時間間距依 t<sub>c</sub>，見下方「短延時時距」）</option>
         <option value="SAMERANK">同位序法（集中型，規劃報告採用）</option>
         <option value="ALTBLOCK">交替區塊法（依降雨強度公式）</option>
         <option value="CHICAGO">Chicago 法（Keifer–Chu）</option>
@@ -3949,9 +3949,7 @@ function readStormParams() {
   let t = g('select_stormType') || "AUTO", auto = false;
   if (t === "AUTO") {
     auto = true;
-    let tc = Infinity;
-    try { const w = currentWatershedParams; if (w && w.L_m && w.H_m) tc = calcRzihaTc(w.L_m, w.H_m).Tc_hr; } catch (e) {}
-    t = tc < 1 ? "HORNER10" : "SAMERANK";
+    t = "HORNER10";  // 水保手冊調-4-22／出流管制技術手冊 §4.3：設計雨型採 Horner 公式交替區塊法；時距依 tc 或固定 10 分
   }
   return { type: STORM_TYPES[t] ? t : "SAMERANK", auto, r: parseFloat(g('input_chicago_r')) || 0.4, huffQ: g('select_huffQ') || "AUTO" };
 }
@@ -4457,7 +4455,7 @@ function runFrequencyAndHydrology() {
     stormTyped.note = `依${idfLabel}，各重現期距各自以 I(t) 計算 t = ${stepLabelOf(dsShort)}、…、24 小時之累積雨量，逐時段相減得時段雨量，最大者置於中間、其餘依交替區塊法右大左小排列（出流管制技術手冊 109.05 第 4.3 節；時距${dsShort === 1 / 6 ? '依手冊取 10 分鐘' : '依 t<sub>c</sub> = ' + rz0.Tc_hr.toFixed(2) + ' hr 之規則取 ' + dsShort + ' hr'}）；24 小時總雨量 P<sub>24</sub> 取自頻率分析成果。歷線之單位降雨延時 D 即採此時距。` + (idfSrc.hornerWanted && idfSrc.src === 'DIMLESS' ? '（尚未選定 Horner 測站，暫以無因次公式計算）' : '') + (idfSrc.src === 'HORNER' && HORNER_TS.some(T => !idfSrc.p[T]) ? `（Horner 參數於 ${HORNER_TS.filter(T => !idfSrc.p[T]).join('、')} 年無有效值，該重現期改用無因次公式）` : '');
   }
   stormPattern24 = [...stormTyped.pattern];
-  { const n = document.getElementById('stormTypeNote'); if (n) n.innerHTML = `採用：<strong>${stormTyped.label}</strong>${stormPrm.auto ? `（自動判斷：t<sub>c</sub> = ${rz0.Tc_hr.toFixed(2)} hr ${rz0.Tc_hr < 1 ? '&lt; 1 hr，採短延時' : '≥ 1 hr，採同位序法'}）` : ''}。${stormTyped.note}`; }
+  { const n = document.getElementById('stormTypeNote'); if (n) n.innerHTML = `採用：<strong>${stormTyped.label}</strong>${stormPrm.auto ? `（自動：依水保手冊／出流管制手冊採 Horner 交替區塊法，t<sub>c</sub> = ${rz0.Tc_hr.toFixed(2)} hr，時距 ${stepLabelOf(dsShort)}）` : ''}。${stormTyped.note}`; }
   const ownStorm = { pattern: [...stormPattern24], calc: stormCalc, events: selectedEvents, typed: stormTyped };
   const multiActive = isMultiMode() && !!activePointId && !!multiShared;
   let usedEvents = selectedEvents;
@@ -4585,8 +4583,17 @@ function runFrequencyAndHydrology() {
   { const h = computeHuffPattern(selectedEvents.map(e => e.hourly), stormPrm.huffQ); if (h) addCmp(`${STORM_TYPES.HUFF}（第${h.quartile}四分位）`, h.pattern); }
   { const e = computeEventPattern(selectedEvents); if (e) addCmp(`${STORM_TYPES.EVENT}（${e.event.startLabel.slice(0, 10)}）`, e.pattern); }
   if (!isShortStorm) { const fT = shortFineFn(targetT); addCmp(`${STORM_TYPES.HORNER10}（${stepLabelOf(dsShort)}；${idfSrc.src === 'HORNER' ? 'Horner' : '無因次公式'}）`, aggregateHourly(fT.pct, dsShort), fT); }
+  // 雨型檢核：tc 視窗內最大雨量 ÷ 同重現期 IDF 公式 tc 延時雨量（<1 表示雨型在關鍵延時內雨量集中度不足）
+  const winCheck = c => {
+    const ds = c.fine ? c.fine.ds : 1, pc = c.fine ? c.fine.pct : c.pattern;
+    const n = Math.max(1, Math.round(Math.max(rz.Tc_hr, ds) / ds)), wH = n * ds;
+    let best = 0;
+    for (let i = 0; i + n <= pc.length; i++) { let sm = 0; for (let j = 0; j < n; j++) sm += pc[i + j]; if (sm > best) best = sm; }
+    const rain = p24Target * best / 100, idfR = idfAt(targetT, wH, P_ann0, idfSrc).I * wH;
+    return { winH: wH, winRain: rain, idfRain: idfR, winRatio: idfR > 0 ? rain / idfR : NaN };
+  };
   const patternCompare = cmpDefs.map(c => ({
-    label: c.label, pattern: c.pattern,
+    label: c.label, pattern: c.pattern, ...winCheck(c),
     tri: computeModifiedTriangularUH(p24Target, c.pattern, A_km2, rz.Tc_hr, C_coef, CN_val, c.fine).Qp,
     scs: computeSCSUnitHydrograph(p24Target, c.pattern, A_km2, rz.Tc_hr, C_coef, CN_val, c.fine).Qp
   }));
@@ -5617,7 +5624,8 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
   <h3>五、雨型設計（${d.stormTyped.label}）</h3>
   <p>本次採用雨型：<strong>${d.stormTyped.label}</strong>。${d.stormTyped.note}${d.stormTyped.type !== 'SAMERANK' ? '以下並保留同位序法（規劃報告採用之集中型）之計算過程供對照，雨型比較見表 5-4。' : ''}</p>
-  <p>本集水區之雨型設計參採同位序法進行，將每時段雨量所佔 24 小時總雨量之百分率求出並按同位序排列（最大值居於第 12 小時，其餘依序向兩側遞減），時間分配型態如圖 3 及附錄表 A-6 所示，計算步驟說明如下。</p>
+  ${d.stormTyped.type === 'SAMERANK' ? `<p>本集水區之雨型設計參採同位序法進行，將每時段雨量所佔 24 小時總雨量之百分率求出並按同位序排列（最大值居於第 12 小時，其餘依序向兩側遞減），時間分配型態如圖 3 及附錄表 A-6 所示，計算步驟說明如下。</p>` : ''}
+  <p><strong>雨型選用依據：</strong>水土保持手冊（調-4-22）列同位序平均法、序率馬可夫雨型與 Horner 公式雨型法為常用設計雨型，計算例採 Horner 公式雨型法（以 t<sub>c</sub> 決定時距：t<sub>c</sub> ＜ 1 hr 為 5 分鐘，1–2 hr 為 10 分鐘，依此類推至 ≥ 6 hr 為 60 分鐘；以各延時累積雨量相減後，最大值置中、依右大左小排列）；出流管制技術手冊 §4.3 亦規定採 Horner 公式、時間刻度 10 分鐘之交替區塊法。逕流分擔技術手冊（II-8）則要求沿用治理計畫所設定之設計雨型，並可另以歷史颱洪事件之實測雨型比較。據此，本報告以 Horner 公式交替區塊法為設計雨型（本次時距：${d.stormTyped.dsShort ? (d.stormTyped.dsShort < 1 - 1e-9 ? Math.round(d.stormTyped.dsShort * 60) + ' 分鐘' : d.stormTyped.dsShort + ' hr') : '1 hr'}），同位序法、Chicago 法、Huff 法及實測事件雨型僅供敏感度比較（表 5-4）。</p>
   ${rankStepHTML}
 
   <div class="fig-box">
@@ -5627,12 +5635,12 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
 
   <div class="caption">表 5-4 各雨型洪峰流量比較（設計重現期 ${d.targetT} 年；單位：cms）</div>
-  <table><thead><tr><th>雨型</th><th>修正三角型 (△)</th><th>SCS 無因次 (S)</th><th>相對本次採用（△）</th></tr></thead><tbody>
-    ${d.patternCompare.map((c, k) => `<tr style="${k === 0 ? 'font-weight:bold;background:#fef9c3;' : ''}"><td style="text-align:left;">${c.label}</td><td>${c.tri.toFixed(2)}</td><td>${c.scs.toFixed(2)}</td><td>${(c.tri / d.patternCompare[0].tri).toFixed(3)}</td></tr>`).join('')}
+  <table><thead><tr><th>雨型</th><th>修正三角型 (△)</th><th>SCS 無因次 (S)</th><th>相對本次採用（△）</th><th>t<sub>c</sub> 視窗最大雨量 (mm)</th><th>IDF 公式雨量 (mm)</th><th>比值</th></tr></thead><tbody>
+    ${d.patternCompare.map((c, k) => `<tr style="${k === 0 ? 'font-weight:bold;background:#fef9c3;' : ''}"><td style="text-align:left;">${c.label}</td><td>${c.tri.toFixed(2)}</td><td>${c.scs.toFixed(2)}</td><td>${(c.tri / d.patternCompare[0].tri).toFixed(3)}</td><td>${c.winRain.toFixed(1)}</td><td>${c.idfRain.toFixed(1)}</td><td${c.winRatio < 0.85 ? ' style="color:#b45309;font-weight:bold;"' : ''}>${c.winRatio.toFixed(2)}</td></tr>`).join('')}
   </tbody></table>
   <div class="caption">圖 5-3 各雨型 24 小時累積雨量曲線比較（粗黑線＝本次採用）</div>
   <div style="text-align:center;">${cumCompareSVG(d.patternCompare, 640, 330)}</div>
-  <p>雨型僅影響單位歷線法之洪峰；合理化公式以集流時間之降雨強度計算，不受雨型影響。設計採用之雨型為上表第一列，其餘供敏感度比較。</p>
+  <p>雨型僅影響單位歷線法之洪峰；合理化公式以集流時間之降雨強度計算，不受雨型影響。設計採用之雨型為上表第一列，其餘供敏感度比較。<strong>雨型檢核：</strong>「比值」為各雨型在 t<sub>c</sub> 視窗（${d.patternCompare[0].winH < 1 - 1e-9 ? Math.round(d.patternCompare[0].winH * 60) + ' 分鐘' : d.patternCompare[0].winH.toFixed(2) + ' hr'}）內之最大累積雨量，除以同重現期降雨強度公式於該延時之雨量；比值明顯小於 1（本表以 0.85 標示）表示該雨型於關鍵延時內雨量集中度不足，洪峰將低於以 IDF 公式為依據之推估，應謹慎採用。</p>
 
   <h3>六、洪峰流量分析與單位歷線圖</h3>
   <p>本集水區面積為 <strong>${w.A_ha.toFixed(1)} ha</strong>（${isLarge ? '大於 1,000 ha，依水土保持技術規範採用單位歷線法（本次：' + d.uhMethodLabel + '）' : '小於 1,000 ha，依水土保持技術規範採用合理化公式法'}）。天然河段採用芮哈（Rziha）經驗公式估算流下速度 W = 72 × (H/L)<sup>0.6</sup>，集流時間分析成果如表 6 所示；無因次降雨強度分析成果如表 7 所示；修正三角型單位歷線原理與設計洪水歷線如圖 4 及表 8 所示；各重現期距洪峰流量彙整如表 9 所示。</p>
