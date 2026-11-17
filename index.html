@@ -23,6 +23,15 @@
     #leftPanel { width: 640px; min-width: 380px; max-width: 85vw; flex: none; height: 100vh; overflow-y: auto; padding: 14px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; gap: 10px; }
     #rightPanel { flex: 1; display: flex; flex-direction: column; height: 100vh; }
     #map { flex: 1; min-height: 100%; background: #090d16; cursor: crosshair; }
+    .coord-readout { background: rgba(15,23,42,.88); color: #e2e8f0; padding: 4px 9px; border: 1px solid #475569; border-radius: 6px; font: 12.5px/1.5 Consolas, "Microsoft JhengHei", monospace; pointer-events: none; white-space: nowrap; }
+    .coord-readout b { color: #7dd3fc; }
+    .grid-label { color: #b91c1c; background: rgba(255,255,255,.78); font: bold 11px Consolas, monospace; padding: 0 3px; border-radius: 3px; white-space: nowrap; pointer-events: none; }
+    .coord-pin { position: relative; width: 34px; height: 34px; }
+    .coord-pin::before, .coord-pin::after { content: ""; position: absolute; background: #ef4444; box-shadow: 0 0 0 1px #fff; }
+    .coord-pin::before { left: 16px; top: 0; width: 2px; height: 34px; }
+    .coord-pin::after { top: 16px; left: 0; height: 2px; width: 34px; }
+    .coord-pin i { position: absolute; left: 7px; top: 7px; width: 20px; height: 20px; border: 3px solid #ef4444; border-radius: 50%; box-shadow: 0 0 0 1px #fff; }
+    .map-toggle-btn { background: #0284c7; color: #fff; border: none; border-radius: 4px; padding: 6px 10px; font: bold 13px "Microsoft JhengHei", sans-serif; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
     .drawer-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; }
     .card h3 { margin: 0 0 8px 0; font-size: 15.5px; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 5px; }
@@ -126,7 +135,8 @@
     </div>
     <div style="display:flex; gap:4px; align-items:center; margin-bottom:6px;">
       <select id="coordSys" style="width:auto; margin:0;">
-        <option value="twd97" selected>TWD97 X,Y</option>
+        <option value="twd97" selected>TWD97 X,Y（本島 121°帶）</option>
+        <option value="twd97_119">TWD97 X,Y（澎金馬 119°帶）</option>
         <option value="wgs84">經度,緯度</option>
       </select>
       <input type="number" id="coordA" placeholder="X（例 240000）" step="any" style="margin:0; flex:1; min-width:0;" />
@@ -602,6 +612,8 @@ const HORNER_DB = {"01A350":["富貴角","北海岸河系",[[875.087,15.132,0.66
 // 1. TWD97 座標轉換、全臺 CODiS 雨量站資料庫 & 農村水保署土石流潛勢溪流點位庫
 // ============================================================================
 proj4.defs("EPSG:3826", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+// 澎湖、金門、馬祖使用 TWD97 二度分帶 119°E 帶（EPSG:3827）
+proj4.defs("EPSG:3827", "+proj=tmerc +lat_0=0 +lon_0=119 +k=0.9999 +x_0=250000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
 
 const CODIS_STATIONS_RAW = [
   ["466881","新北",121.525196,24.959207,24.5,"新北市"],["466900","淡水",121.448906,25.164889,19,"新北市"],["466910","鞍部",121.529731,25.182586,837.6,"臺北市"],
@@ -1357,6 +1369,8 @@ const layerThiessen = L.layerGroup().addTo(map);
 const layerStations = L.layerGroup().addTo(map);
 const layerDebrisStreams = L.layerGroup().addTo(map);
 const layerControlPoints = L.layerGroup().addTo(map);
+const layerGrid = L.layerGroup();          // TWD97 公里格網（隨縮放重繪）
+const layerCoordMarker = L.layerGroup().addTo(map);  // 輸入座標後的位置標記
 
 const baseLayers = {
   "臺灣通用電子地圖 (國土測繪中心等高線版)": L.tileLayer('https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}', {
@@ -1375,8 +1389,68 @@ L.control.layers(baseLayers, {
   "集水區與主河道": layerWatershed,
   "徐昇多邊形控制區": layerThiessen,
   "雨量站點位": layerStations,
-  "農村水保署土石流潛勢溪流": layerDebrisStreams
+  "農村水保署土石流潛勢溪流": layerDebrisStreams,
+  "TWD97 座標格網": layerGrid
 }).addTo(map);
+
+// ---- 比例尺 ----
+L.control.scale({ imperial: false, metric: true, position: 'bottomright' }).addTo(map);
+
+// ---- 滑鼠位置座標讀數（TWD97 + 經緯度） ----
+const coordReadout = L.control({ position: 'bottomleft' });
+coordReadout.onAdd = () => { const d = L.DomUtil.create('div', 'coord-readout'); d.innerHTML = '移動滑鼠顯示座標'; return d; };
+coordReadout.addTo(map);
+function twdZoneOf(lng) { return lng < 119.8 ? { epsg: "EPSG:3827", name: "TWD97(119°帶)" } : { epsg: "EPSG:3826", name: "TWD97" }; }
+function fmtCoordHtml(lat, lng, zoom) {
+  const z = twdZoneOf(lng), [x, y] = proj4("EPSG:4326", z.epsg, [lng, lat]);
+  return `<b>${z.name}</b> X ${Math.round(x).toLocaleString('en-US')}　Y ${Math.round(y).toLocaleString('en-US')}　｜　經度 ${lng.toFixed(5)}°　緯度 ${lat.toFixed(5)}°` + (zoom != null ? `　｜　縮放 ${zoom}` : '');
+}
+map.on('mousemove', e => { coordReadout.getContainer().innerHTML = fmtCoordHtml(e.latlng.lat, e.latlng.lng, map.getZoom()); });
+
+// ---- 左側面板收合（放大地圖） ----
+const panelToggle = L.control({ position: 'topleft' });
+panelToggle.onAdd = () => {
+  const b = L.DomUtil.create('button', 'map-toggle-btn'); b.type = 'button'; b.textContent = '⛶ 放大地圖（收合左側面板）';
+  L.DomEvent.disableClickPropagation(b);
+  b.addEventListener('click', () => {
+    const lp = document.getElementById('leftPanel'), vs = document.getElementById('vSplit');
+    const hide = lp.style.display !== 'none';
+    lp.style.display = hide ? 'none' : ''; vs.style.display = hide ? 'none' : '';
+    b.textContent = hide ? '◧ 還原左側面板' : '⛶ 放大地圖（收合左側面板）';
+    setTimeout(() => map.invalidateSize(), 50);
+  });
+  return b;
+};
+panelToggle.addTo(map);
+
+// ---- TWD97 公里格網（預設開啟；不攔截滑鼠，不影響點擊劃定） ----
+function redrawGrid() {
+  layerGrid.clearLayers();
+  if (!map.hasLayer(layerGrid)) return;
+  const z = map.getZoom(); if (z < 9) return;
+  const step = z <= 10 ? 20000 : z <= 12 ? 10000 : z === 13 ? 5000 : z === 14 ? 2000 : z === 15 ? 1000 : 500;
+  const b = map.getBounds(), zone = twdZoneOf(map.getCenter().lng);
+  const cs = [[b.getWest(), b.getSouth()], [b.getEast(), b.getSouth()], [b.getWest(), b.getNorth()], [b.getEast(), b.getNorth()]].map(p => proj4("EPSG:4326", zone.epsg, p));
+  const xmin = Math.min(...cs.map(c => c[0])), xmax = Math.max(...cs.map(c => c[0])), ymin = Math.min(...cs.map(c => c[1])), ymax = Math.max(...cs.map(c => c[1]));
+  const x0 = Math.ceil(xmin / step) * step, y0 = Math.ceil(ymin / step) * step;
+  if ((xmax - x0) / step > 40 || (ymax - y0) / step > 40) return;
+  const style = { color: '#dc2626', weight: 1, opacity: 0.55, interactive: false, dashArray: '4 4' };
+  const toLL = (x, y) => { const [lo, la] = proj4(zone.epsg, "EPSG:4326", [x, y]); return [la, lo]; };
+  const NSEG = 6, lab = (ll, txt, anchor) => L.marker(ll, { interactive: false, keyboard: false, icon: L.divIcon({ className: '', html: `<span class="grid-label">${txt}</span>`, iconSize: null, iconAnchor: anchor }) });
+  for (let x = x0; x <= xmax; x += step) {
+    const pts = []; for (let i = 0; i <= NSEG; i++) pts.push(toLL(x, ymin + (ymax - ymin) * i / NSEG));
+    L.polyline(pts, style).addTo(layerGrid);
+    const at = toLL(x, ymin + (ymax - ymin) * 0.02); lab([Math.max(b.getSouth(), at[0]) + (b.getNorth() - b.getSouth()) * 0.03, at[1]], 'E ' + x.toLocaleString('en-US'), [-2, 0]).addTo(layerGrid);
+  }
+  for (let y = y0; y <= ymax; y += step) {
+    const pts = []; for (let i = 0; i <= NSEG; i++) pts.push(toLL(xmin + (xmax - xmin) * i / NSEG, y));
+    L.polyline(pts, style).addTo(layerGrid);
+    const at = toLL(xmin + (xmax - xmin) * 0.02, y); lab([at[0], Math.max(b.getWest(), at[1]) + (b.getEast() - b.getWest()) * 0.01], 'N ' + y.toLocaleString('en-US'), [0, 12]).addTo(layerGrid);
+  }
+}
+layerGrid.addTo(map);
+map.on('moveend zoomend overlayadd overlayremove', redrawGrid);
+redrawGrid();
 
 // 透過「純站名」或「站號」自動尋找對應的雨量資料庫紀錄 (徹底擺脫 C1F850 vs DC1F9C0 代號不合問題)
 function getStationDB(st) {
@@ -1959,20 +2033,27 @@ document.getElementById('btnCoordGo').addEventListener('click', async () => {
   const a = parseFloat(document.getElementById('coordA').value), b = parseFloat(document.getElementById('coordB').value);
   if (!isFinite(a) || !isFinite(b)) { setStatus("請輸入兩個數值座標。", "warn"); return; }
   let lat, lng;
-  if (sys === 'twd97') {
-    if (a < 100000 || a > 400000 || b < 2400000 || b > 2800000) { setStatus("TWD97 座標超出台灣範圍（X 約 15萬～35萬，Y 約 242萬～280萬），請確認是否 X、Y 填反。", "warn"); return; }
-    [lng, lat] = proj4("EPSG:3826", "EPSG:4326", [a, b]);
+  if (sys === 'twd97' || sys === 'twd97_119') {
+    const epsg = sys === 'twd97' ? "EPSG:3826" : "EPSG:3827";
+    if (a < 100000 || a > 400000 || b < 2400000 || b > 3100000) { setStatus("TWD97 座標超出台灣範圍（X 約 15萬～35萬，Y 約 242萬～280萬；澎金馬 119°帶 Y 可達 290 萬），請確認是否 X、Y 填反。", "warn"); return; }
+    [lng, lat] = proj4(epsg, "EPSG:4326", [a, b]);
+    if (sys === 'twd97' && lng < 119.5) setStatus("此座標換算後經度 " + lng.toFixed(2) + "°E，位於澎金馬一帶，請確認是否應選「澎金馬 119°帶」。", "warn");
   } else {
     lng = a; lat = b;
     if (lat > 100 && lng < 100) { lng = b; lat = a; } // 防填反
     if (lng < 118 || lng > 123 || lat < 21 || lat > 27) { setStatus("經緯度超出台灣範圍，請確認（經度 118～123、緯度 21～27）。", "warn"); return; }
   }
   if (isDrawingPolygon) { setStatus("手動描繪集水區中，請先完成或取消描繪。", "warn"); return; }
-  map.setView([lat, lng], Math.max(map.getZoom(), 14));
+  // 先在地圖標出輸入位置（十字＋座標標籤），並縮放到該點
+  layerCoordMarker.clearLayers();
+  L.marker([lat, lng], { interactive: false, keyboard: false, icon: L.divIcon({ className: '', html: '<div class="coord-pin"><i></i></div>', iconSize: [34, 34], iconAnchor: [17, 17] }) })
+    .bindTooltip('輸入座標位置<br>' + fmtCoordHtml(lat, lng, null).replace(/　｜　/g, '<br>'), { permanent: true, direction: 'right', offset: [18, 0], opacity: 0.95 })
+    .addTo(layerCoordMarker);
+  map.setView([lat, lng], Math.max(map.getZoom(), 16));
   await runDelineation(lat, lng);
 });
 document.getElementById('coordSys').addEventListener('change', (e) => {
-  const tw = e.target.value === 'twd97';
+  const tw = e.target.value.startsWith('twd97');
   document.getElementById('coordA').placeholder = tw ? 'X（例 240000）' : '經度（例 120.95）';
   document.getElementById('coordB').placeholder = tw ? 'Y（例 2650000）' : '緯度（例 24.55）';
 });
