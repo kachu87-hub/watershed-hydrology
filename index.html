@@ -4526,8 +4526,16 @@ function runFrequencyAndHydrology() {
   const rowIntensities = [], rowRat = [], rowTri = [], rowScs = [];
   let triRes = null, scsRes = null, targetRatQp = 0, p24Target = 0;
 
-  RETURN_PERIODS.forEach(T => {
-    const iT = idfRows.find(x => x.T === T).I;
+  // 強度校正：合理化公式的 I 與單位歷線之 P24 同源 —— 以頻率分析 P24(T) ÷ 強度公式反推 24 小時雨量 作為校正係數
+  const idfCalib = RETURN_PERIODS.map(T => {
+    const raw = idfRows.find(x => x.T === T).I;
+    const depth24 = idfAt(T, 24, P_annual, idfSrc).I * 24;
+    const p24 = freq24.results[selectedCode].quantiles[T];
+    const k = (depth24 > 0 && p24 > 0) ? p24 / depth24 : 1;
+    return { T, raw, depth24, p24, k, adj: raw * k };
+  });
+  RETURN_PERIODS.forEach((T, ti) => {
+    const iT = idfCalib[ti].adj;
     rowIntensities.push(iT);
     const qRat = (1 / 360) * C_coef * iT * A_ha;
     rowRat.push(qRat);
@@ -4626,7 +4634,7 @@ function runFrequencyAndHydrology() {
     C_coef,
     alphaPct,
     stormPattern24,
-    rowIntensities,
+    rowIntensities, idfCalib,
     rowRat,
     stationFreqs,
     rowTri,
@@ -5386,11 +5394,17 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
   const idfR = calcDimensionlessIntensity(d.P_annual, w.Tc_hr, d.targetT);
   const tMin = w.Tc_hr * 60;
+
+  const calibHTML = `
+  <p><strong>降雨強度與頻率分析雨量之一致性校正：</strong>強度公式（區域經驗式）與本集水區 24 小時暴雨頻率分析所得之 P<sub>24</sub> 係不同來源，兩者隨重現期之成長率不同，若直接使用，合理化公式與單位歷線會採用不同的雨量。故以 k = P<sub>24</sub>(T) ÷ 強度公式反推 24 小時雨量 [I(T, 24 hr) × 24] 校正 t<sub>c</sub> 之降雨強度：I<sub>採用</sub> = k × I(T, t<sub>c</sub>)，使兩方法之雨量基礎一致。</p>
+  <div class="caption">表 6-2 降雨強度一致性檢核與校正</div>
+  <table><thead><tr><th>T (年)</th><th>公式反推 24 hr 雨量 (mm)</th><th>頻率分析 P<sub>24</sub> (mm)</th><th>差距</th><th>校正係數 k</th><th>I(t<sub>c</sub>) 原值 (mm/hr)</th><th>I(t<sub>c</sub>) 採用值 (mm/hr)</th></tr></thead><tbody>${d.idfCalib.map(c => { const dv = (c.k - 1) * 100; return `<tr${Math.abs(dv) > 10 ? ' style="background:#fef3c7;"' : ''}><td style="text-align:center;">${c.T}</td><td>${c.depth24.toFixed(1)}</td><td>${c.p24.toFixed(1)}</td><td>${dv >= 0 ? '+' : ''}${dv.toFixed(1)}%</td><td>${c.k.toFixed(3)}</td><td>${c.raw.toFixed(2)}</td><td><strong>${c.adj.toFixed(2)}</strong></td></tr>`; }).join('')}</tbody></table>
+  ${d.idfCalib.some(c => Math.abs(c.k - 1) > 0.10) ? '<p style="color:#b45309;">註：標示底色者，強度公式與頻率分析 P<sub>24</sub> 差距超過 10%，建議確認雨量站、年平均雨量或 Horner 測站之選用是否合理。</p>' : ''}`;
   const idfRows = [2, 5, 10, 25, 50, 100, 200].map((T, i) => {
     const lg = Math.log10(T);
     const f1 = idfR.G + idfR.H * lg;
     const f2 = idfR.A / Math.pow(tMin + idfR.B, idfR.C);
-    return `<tr><td style="text-align:center;">${T}</td><td>${lg.toFixed(4)}</td><td>${f1.toFixed(4)}</td><td>${f2.toFixed(4)}</td><td>${idfR.I60_25.toFixed(2)}</td><td><strong>${d.rowIntensities[i].toFixed(2)}</strong></td></tr>`;
+    return `<tr><td style="text-align:center;">${T}</td><td>${lg.toFixed(4)}</td><td>${f1.toFixed(4)}</td><td>${f2.toFixed(4)}</td><td>${idfR.I60_25.toFixed(2)}</td><td><strong>${d.idfCalib[i].raw.toFixed(2)}</strong></td></tr>`;
   }).join('');
   const hornerRows = (d.idfInfo && d.idfInfo.src === 'HORNER') ? d.idfInfo.rows.map(r => `<tr><td style="text-align:center;">${r.T}</td>${r.abc ? `<td>${r.abc[0]}</td><td>${r.abc[1]}</td><td>${r.abc[2]}</td>` : '<td colspan="3" style="text-align:center;">「－」無有效參數，改用無因次公式</td>'}<td><strong>${r.I.toFixed(2)}</strong></td></tr>`).join('') : '';
   const idfStepHTML = (d.idfInfo && d.idfInfo.src === 'HORNER') ? `
@@ -5398,7 +5412,8 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <p>I = a / (t + b)<sup>c</sup>　（I：mm/hr；t：分鐘）</p>
   <div class="caption">表 6-1 Horner 公式參數與各重現期降雨強度</div>
   <table><thead><tr><th>T (年)</th><th>a</th><th>b</th><th>c</th><th>I (mm/hr)</th></tr></thead><tbody>${hornerRows}</tbody></table>
-  <p>合理化公式洪峰流量：Q<sub>p</sub> = C × I × A / 360（A 以 ha、I 以 mm/hr 計）。以 ${d.targetT} 年為例：Q<sub>p</sub> = ${d.C_coef} × ${d.rowIntensities[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} × ${w.A_ha.toFixed(1)} / 360 = ${d.rowRat[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} cms。</p>` : `
+  ${calibHTML}
+  <p>合理化公式洪峰流量：Q<sub>p</sub> = C × I × A / 360（A 以 ha、I 為上表校正後採用值，mm/hr）。以 ${d.targetT} 年為例：Q<sub>p</sub> = ${d.C_coef} × ${d.rowIntensities[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} × ${w.A_ha.toFixed(1)} / 360 = ${d.rowRat[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} cms。</p>` : `
   <p><strong>無因次降雨強度計算步驟：</strong>以年平均降雨量 P = ${d.P_annual.toFixed(1)} mm、t = t<sub>c</sub> × 60 = ${tMin.toFixed(1)} min，依下式計算：</p>
   <p>I<sub>T</sub> = I<sub>60</sub><sup>25</sup> × (G + H·log T) × a / (t + B)<sup>C</sup></p>
   <p>I<sub>60</sub><sup>25</sup> = [P / (25.29 + 0.094P)]² = ${idfR.I60_25.toFixed(2)}　　a = [P / (−189.96 + 0.31P)]² = ${idfR.A.toFixed(2)}　　B = 55<br>
@@ -5406,7 +5421,8 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <p>（式中 a 為迴歸係數，非集水區面積。）各重現期距之計算過程如表 6-1，成果即為表 7。</p>
   <div class="caption">表 6-1 無因次降雨強度逐重現期計算過程</div>
   <table><thead><tr><th>T (年)</th><th>log T</th><th>G + H·log T</th><th>a / (t+B)<sup>C</sup></th><th>I<sub>60</sub><sup>25</sup></th><th>I<sub>T</sub> (mm/hr)</th></tr></thead><tbody>${idfRows}</tbody></table>
-  <p>合理化公式洪峰流量：Q<sub>p</sub> = C × I × A / 360（A 以 ha、I 以 mm/hr 計）。以 ${d.targetT} 年為例：Q<sub>p</sub> = ${d.C_coef} × ${d.rowIntensities[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} × ${w.A_ha.toFixed(1)} / 360 = ${d.rowRat[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} cms。</p>`;
+  ${calibHTML}
+  <p>合理化公式洪峰流量：Q<sub>p</sub> = C × I × A / 360（A 以 ha、I 為上表校正後採用值，mm/hr）。以 ${d.targetT} 年為例：Q<sub>p</sub> = ${d.C_coef} × ${d.rowIntensities[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} × ${w.A_ha.toFixed(1)} / 360 = ${d.rowRat[RETURN_PERIODS.indexOf(d.targetT)].toFixed(2)} cms。</p>`;
 
   const uh = d.triRes;
   const scs = d.scsRes;
