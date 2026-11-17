@@ -459,6 +459,14 @@
           <input type="number" id="input_df_phi" value="35.0" min="25" max="45" step="1" style="margin-bottom:0;" />
         </div>
         <div>
+          <label>土粒單位重 γ<sub>s</sub> (t/m³)</label>
+          <input type="number" id="input_df_gs" value="2.65" min="2" max="3.2" step="0.05" style="margin-bottom:0;" />
+        </div>
+        <div>
+          <label>水單位重 γ<sub>w</sub> (t/m³)</label>
+          <input type="number" id="input_df_gw" value="1.0" min="0.9" max="1.3" step="0.05" style="margin-bottom:0;" />
+        </div>
+        <div>
           <label>體積濃度 C<sub>d</sub>（採用值）</label>
           <input type="text" id="ui_df_Cd" value="0.300" readonly style="margin-bottom:0; background:#0f172a; color:#fca5a5; font-weight:bold;" />
           <div id="ui_df_CdNote" style="font-size:10.5px; color:#94a3b8; margin-top:3px;"></div>
@@ -545,9 +553,9 @@
       <button id="btnExportCSV2" class="secondary" style="margin-bottom:0;">下載 CSV 計算書</button>
     </div>
     <div style="margin-top:8px; display:flex; align-items:center; gap:8px; font-size:12.5px; color:#cbd5e1;">
-      <span style="white-space:nowrap;">雨量站點位不透明度（畫面與報告圖）</span>
-      <input type="range" id="rngStAlpha" min="0" max="100" step="5" value="60" style="margin:0; flex:1;" />
-      <span id="stAlphaVal" style="width:38px; text-align:right;">60%</span>
+      <span style="white-space:nowrap;">徐昇影響面積填色不透明度（畫面與報告圖）</span>
+      <input type="range" id="rngStAlpha" min="0" max="100" step="5" value="30" style="margin:0; flex:1;" />
+      <span id="stAlphaVal" style="width:38px; text-align:right;">30%</span>
     </div>
   </div>
 </div>
@@ -1416,13 +1424,15 @@ function renderStationMarkers() {
       radius: 6, fillColor: "#dc2626", color: "#fef08a", weight: 2, fillOpacity: 0.9
     }).bindTooltip(`⚠️ 土石流潛勢溪流：${df.id}<br>${df.name}`).addTo(layerDebrisStreams);
   });
-  applyStAlphaToMap();
 }
-// 雨量站點位不透明度滑桿：同時作用於畫面上的站點標記與報告地圖
-function applyStAlphaToMap() {
+// 徐昇影響面積填色不透明度滑桿：同時作用於畫面上的徐昇多邊形與報告地圖（雨量站點位不受影響）
+function stFillAlpha() {
   const el = document.getElementById('rngStAlpha');
-  const a = el ? Math.max(0, Math.min(1, (parseFloat(el.value) || 0) / 100)) : 0.95;
-  layerStations.eachLayer(l => { if (l.setStyle) l.setStyle({ fillOpacity: a, opacity: Math.max(0.25, a) }); });
+  return el ? Math.max(0, Math.min(1, (parseFloat(el.value) || 0) / 100)) : 0.3;
+}
+function applyStAlphaToMap() {
+  const a = stFillAlpha();
+  layerThiessen.eachLayer(l => { if (l.setStyle) l.setStyle({ fillOpacity: a }); });
 }
 renderStationMarkers();
 
@@ -1445,7 +1455,8 @@ function calcDebrisFlowMetrics(Qp_clear) {
   const phiDeg = parseFloat(document.getElementById('input_df_phi').value) || 35.0;
   const tanA = parseFloat(document.getElementById('input_df_tanA').value) || 0.32;
   const Cm = Math.min(0.9, Math.max(0.1, parseFloat(document.getElementById('input_df_Cm').value) || 0.56));
-  const gamma_w = 1.0, gamma_s = 2.65;
+  const gamma_w = parseFloat(document.getElementById('input_df_gw').value) || 1.0;
+  const gamma_s = parseFloat(document.getElementById('input_df_gs').value) || 2.65;
   const tanPhi = Math.tan(phiDeg * Math.PI / 180);
   let tanTheta = Math.tan(thetaDeg * Math.PI / 180);
   const CD_MIN = gamma_w / (gamma_w + gamma_s), CD_MAX = 0.9 * Cm;
@@ -1491,7 +1502,7 @@ function calcDebrisFlowMetrics(Qp_clear) {
   return {
     isDebris,
     dfId: document.getElementById('input_df_id').value || "潛勢溪流",
-    thetaDeg, phiDeg, tanA, Cm, CD_MIN, CD_MAX,
+    thetaDeg, phiDeg, tanA, Cm, CD_MIN, CD_MAX, gamma_s, gamma_w,
     method, CdT, CdL, Cd, CdRaw: Cd_raw, CdNote, CdState, reason,
     amp: Cm / (Cm - Cd),
     Qd
@@ -2258,7 +2269,7 @@ function recomputeActiveVoronoi() {
     const names = g.map(m => `${m.name}${m.withdrawn ? '(撤銷站)' : ''}`).join("、");
     const ha = g.reduce((a, m) => a + m.areaHa, 0), wt = g.reduce((a, m) => a + m.weight, 0);
     L.geoJSON(item.clipped, {
-      style: { color: col, weight: 2.5, dashArray: "5,4", fillColor: col, fillOpacity: 0.25, interactive: false }
+      style: { color: col, weight: 2.5, dashArray: "5,4", fillColor: col, fillOpacity: stFillAlpha(), interactive: false }
     }).bindTooltip(`${names}: ${ha.toFixed(1)} ha (${(wt * 100).toFixed(1)}%)`).addTo(layerThiessen);
   });
 }
@@ -5009,7 +5020,9 @@ async function renderWatershedMapImageForReport(d) {
   ctx.fillRect(plotX, plotY, plotW, plotH);
 
   // 2. 繪製已勾選雨量站之 100% 徐昇多邊形交集控制區
-  const fillColors = ["rgba(245,158,11,0.34)", "rgba(139,92,246,0.30)", "rgba(236,72,153,0.30)", "rgba(16,185,129,0.30)", "rgba(6,182,212,0.30)"];
+  const fillRGB = ["245,158,11", "139,92,246", "236,72,153", "16,185,129", "6,182,212"];
+  const fillA = Math.min(1, Math.max(0, (parseFloat((document.getElementById('rngStAlpha') || {}).value) || 0) / 100));
+  const fillColors = fillRGB.map(c => `rgba(${c},${fillA})`);
   const strokeColors = ["#d97706", "#7c3aed", "#db2777", "#059669", "#0891b2"];
 
   activeThiessen.forEach((st, idx) => {
@@ -5090,7 +5103,7 @@ async function renderWatershedMapImageForReport(d) {
   // 5. 繪製採用雨量站點位與站名標籤（圓點採徐昇區同色；標籤避開集水區；透明度可調）
   {
     const alphaEl = document.getElementById('rngStAlpha');
-    const alpha = Math.min(1, Math.max(0, (alphaEl ? parseFloat(alphaEl.value) : 60) / 100));
+    const alpha = 0.6;   // 雨量站點位固定不透明度（滑桿改控制徐昇影響面積填色）
     const wsRings = [];
     if (d.watershed.feature) {
       const g0 = d.watershed.feature.geometry;
@@ -5714,7 +5727,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
   <h3>七、含砂水流與土石流潛勢溪流流量分析</h3>
   <p>1. <strong>一般含砂水流流量</strong>：考量山區集水區豪雨時易夾帶泥砂，含砂水流洪峰流量以 Q<sub>s</sub> = Q<sub>p</sub>(1 + &alpha;) 估算，採用泥砂混合率 &alpha; = ${(d.alphaPct * 100).toFixed(0)}%。</p>
-  <p>2. <strong>土石流潛勢溪流尖峰流量</strong>：${df.isDebris ? `本溪流屬農業部農村發展及水土保持署公告之土石流潛勢溪流（編號：<strong>${df.dfId}</strong>），` : '若考慮極端暴雨誘發土石流情境，'}依水土保持手冊（土石流篇），溪床坡度 &theta; = ${df.thetaDeg}°、土石內摩擦角 &phi; = ${df.phiDeg}°、動摩擦係數 tan&alpha; = ${df.tanA}、靜止土體最大濃度 C<sub>m</sub> = ${df.Cm}、&gamma;<sub>s</sub> = 2.65 t/m³、&gamma;<sub>w</sub> = 1.0 t/m³。${df.method === 'T' ? `&theta; 位於 10°～20° 且 Takahashi 公式 C<sub>d</sub> = &gamma;<sub>w</sub>tan&theta; / [(&gamma;<sub>s</sub>−&gamma;<sub>w</sub>)(tan&phi;−tan&theta;)] = ${df.Cd.toFixed(3)} 落於合理範圍 ${df.CD_MIN.toFixed(3)} &le; C<sub>d</sub> &lt; 0.9C<sub>m</sub>（= ${df.CD_MAX.toFixed(3)}），採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。` : `${df.reason}，Takahashi 公式不適用，改採 Lien &amp; Tsai 公式（C<sub>d</sub> = ½[(C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>) ± &radic;((C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>)² − 4&chi;<sub>1</sub>C<sub>m</sub>)]，&xi; = 0.04）${df.CdRaw === null ? '，Lien & Tsai 公式無合理解' : '，推得 ' + df.CdRaw.toFixed(3)}，${df.CdState === 'ok' ? '落於合理範圍' : '超出合理範圍 ' + df.CD_MIN.toFixed(3) + '～' + df.CD_MAX.toFixed(3) + ' 而取邊界值'}，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。`}並依土石流流量公式 Q<sub>D</sub> = C<sub>m</sub> / (C<sub>m</sub> − C<sub>d</sub>) &times; Q<sub>p</sub>（放大倍率 ${df.amp.toFixed(2)}）推算土石流尖峰流量。各重現期含砂水流與土石流流量成果如表 10 及表 11 所示。</p>
+  <p>2. <strong>土石流潛勢溪流尖峰流量</strong>：${df.isDebris ? `本溪流屬農業部農村發展及水土保持署公告之土石流潛勢溪流（編號：<strong>${df.dfId}</strong>），` : '若考慮極端暴雨誘發土石流情境，'}依水土保持手冊（土石流篇），溪床坡度 &theta; = ${df.thetaDeg}°、土石內摩擦角 &phi; = ${df.phiDeg}°、動摩擦係數 tan&alpha; = ${df.tanA}、靜止土體最大濃度 C<sub>m</sub> = ${df.Cm}、&gamma;<sub>s</sub> = ${df.gamma_s} t/m³、&gamma;<sub>w</sub> = ${df.gamma_w} t/m³。${df.method === 'T' ? `&theta; 位於 10°～20° 且 Takahashi 公式 C<sub>d</sub> = &gamma;<sub>w</sub>tan&theta; / [(&gamma;<sub>s</sub>−&gamma;<sub>w</sub>)(tan&phi;−tan&theta;)] = ${df.Cd.toFixed(3)} 落於合理範圍 ${df.CD_MIN.toFixed(3)} &le; C<sub>d</sub> &lt; 0.9C<sub>m</sub>（= ${df.CD_MAX.toFixed(3)}），採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。` : `${df.reason}，Takahashi 公式不適用，改採 Lien &amp; Tsai 公式（C<sub>d</sub> = ½[(C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>) ± &radic;((C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>)² − 4&chi;<sub>1</sub>C<sub>m</sub>)]，&xi; = 0.04）${df.CdRaw === null ? '，Lien & Tsai 公式無合理解' : '，推得 ' + df.CdRaw.toFixed(3)}，${df.CdState === 'ok' ? '落於合理範圍' : '超出合理範圍 ' + df.CD_MIN.toFixed(3) + '～' + df.CD_MAX.toFixed(3) + ' 而取邊界值'}，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。`}並依土石流流量公式 Q<sub>D</sub> = C<sub>m</sub> / (C<sub>m</sub> − C<sub>d</sub>) &times; Q<sub>p</sub>（放大倍率 ${df.amp.toFixed(2)}）推算土石流尖峰流量。各重現期含砂水流與土石流流量成果如表 10 及表 11 所示。</p>
 
   <div class="caption">表 10 不同重現期距之含砂水流與土石流尖峰流量一覽表（單位：cms）</div>
   <table>
@@ -5825,6 +5838,7 @@ initHornerUI(); renderCnRows();
 document.getElementById('chkDebrisStream').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_theta').addEventListener('change', runFrequencyAndHydrology);
 document.getElementById('input_df_phi').addEventListener('change', runFrequencyAndHydrology);
+['input_df_gs', 'input_df_gw'].forEach(id => document.getElementById(id).addEventListener('change', runFrequencyAndHydrology));
 document.getElementById('sel_df_tanA').addEventListener('change', function () {
   if (this.value !== 'custom') document.getElementById('input_df_tanA').value = this.value;
   runFrequencyAndHydrology();
