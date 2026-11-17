@@ -4592,6 +4592,14 @@ function runFrequencyAndHydrology() {
     const rain = p24Target * best / 100, idfR = idfAt(targetT, wH, P_ann0, idfSrc).I * wH;
     return { winH: wH, winRain: rain, idfRain: idfR, winRatio: idfR > 0 ? rain / idfR : NaN };
   };
+  // 實測事件檢核：各場實測事件逐時雨型套用設計 P24，各自計算洪峰（不改變設計值）
+  const eventCands = ((basis.hourly && basis.hourly.candidates) || []).slice().sort((a, b) => b.total - a.total).slice(0, 10);
+  const eventCompare = eventCands.map(e => {
+    const pat = normPct(e.hourly);
+    return { label: e.startLabel, total: e.total,
+      tri: computeModifiedTriangularUH(p24Target, pat, A_km2, rz.Tc_hr, C_coef, CN_val, null).Qp,
+      scs: computeSCSUnitHydrograph(p24Target, pat, A_km2, rz.Tc_hr, C_coef, CN_val, null).Qp };
+  });
   const patternCompare = cmpDefs.map(c => ({
     label: c.label, pattern: c.pattern, ...winCheck(c),
     tri: computeModifiedTriangularUH(p24Target, c.pattern, A_km2, rz.Tc_hr, C_coef, CN_val, c.fine).Qp,
@@ -4651,7 +4659,7 @@ function runFrequencyAndHydrology() {
     idfInfo,
     cnApplied: (CN_APPLIED && CN_val != null && Math.abs(CN_APPLIED.cn - CN_val) < 1e-9) ? CN_APPLIED : null,
     shortStorm: isShortStorm ? { ds: dsShort, label: stepLabelOf(dsShort), idfLabel } : null,
-    patternCompare,
+    patternCompare, eventCompare,
     stormEvents: usedEvents,
     stormCalc,
     ownStorm,
@@ -5638,6 +5646,18 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <table><thead><tr><th>雨型</th><th>修正三角型 (△)</th><th>SCS 無因次 (S)</th><th>相對本次採用（△）</th><th>t<sub>c</sub> 視窗最大雨量 (mm)</th><th>IDF 公式雨量 (mm)</th><th>比值</th></tr></thead><tbody>
     ${d.patternCompare.map((c, k) => `<tr style="${k === 0 ? 'font-weight:bold;background:#fef9c3;' : ''}"><td style="text-align:left;">${c.label}</td><td>${c.tri.toFixed(2)}</td><td>${c.scs.toFixed(2)}</td><td>${(c.tri / d.patternCompare[0].tri).toFixed(3)}</td><td>${c.winRain.toFixed(1)}</td><td>${c.idfRain.toFixed(1)}</td><td${c.winRatio < 0.85 ? ' style="color:#b45309;font-weight:bold;"' : ''}>${c.winRatio.toFixed(2)}</td></tr>`).join('')}
   </tbody></table>
+  ${d.eventCompare && d.eventCompare.length ? (() => {
+    const st = k => { const a = d.eventCompare.map(e => e[k]).sort((x, y) => x - y), n = a.length; return { max: a[n - 1], mean: a.reduce((x, y) => x + y, 0) / n, med: n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2 }; };
+    const t1 = st('tri'), t2 = st('scs');
+    return `<div class="caption">表 5-5 實測颱洪事件雨型之洪峰檢核（設計重現期 ${d.targetT} 年；各場事件之逐時雨量百分率套用設計 24 小時雨量；單位：cms）</div>
+  <table><thead><tr><th>序</th><th>事件起始時間</th><th>實測 24 小時雨量 (mm)</th><th>修正三角型 (△)</th><th>SCS 無因次 (S)</th></tr></thead><tbody>
+    ${d.eventCompare.map((e, i) => `<tr><td style="text-align:center;">${i + 1}</td><td style="text-align:center;">${e.label}</td><td>${e.total.toFixed(1)}</td><td>${e.tri.toFixed(2)}</td><td>${e.scs.toFixed(2)}</td></tr>`).join('')}
+    <tr style="background:#f1f5f9;font-weight:bold;"><td colspan="3" style="text-align:center;">最大值</td><td>${t1.max.toFixed(2)}</td><td>${t2.max.toFixed(2)}</td></tr>
+    <tr style="background:#f1f5f9;font-weight:bold;"><td colspan="3" style="text-align:center;">平均值</td><td>${t1.mean.toFixed(2)}</td><td>${t2.mean.toFixed(2)}</td></tr>
+    <tr style="background:#f1f5f9;font-weight:bold;"><td colspan="3" style="text-align:center;">中位數</td><td>${t1.med.toFixed(2)}</td><td>${t2.med.toFixed(2)}</td></tr>
+  </tbody></table>
+  <p>表 5-5 依逕流分擔技術手冊（II-8）建議，以歷史實測颱洪事件雨型比較，僅作檢核，不改變設計值。實測事件僅有逐時資料，雨型時距為 1 小時，較 Horner 雨型粗，小集水區洪峰可能偏低。</p>`;
+  })() : ''}
   <div class="caption">圖 5-3 各雨型 24 小時累積雨量曲線比較（粗黑線＝本次採用）</div>
   <div style="text-align:center;">${cumCompareSVG(d.patternCompare, 640, 330)}</div>
   <p>雨型僅影響單位歷線法之洪峰；合理化公式以集流時間之降雨強度計算，不受雨型影響。設計採用之雨型為上表第一列，其餘供敏感度比較。<strong>雨型檢核：</strong>「比值」為各雨型在 t<sub>c</sub> 視窗（${d.patternCompare[0].winH < 1 - 1e-9 ? Math.round(d.patternCompare[0].winH * 60) + ' 分鐘' : d.patternCompare[0].winH.toFixed(2) + ' hr'}）內之最大累積雨量，除以同重現期降雨強度公式於該延時之雨量；比值明顯小於 1（本表以 0.85 標示）表示該雨型於關鍵延時內雨量集中度不足，洪峰將低於以 IDF 公式為依據之推估，應謹慎採用。</p>
