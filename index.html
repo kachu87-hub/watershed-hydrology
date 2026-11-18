@@ -215,6 +215,20 @@
         <tr><td colspan="7" style="text-align:center;">請在地圖上點擊河道控制點以自動切出徐昇控制站</td></tr>
       </tbody>
     </table>
+    <details id="mergeBox" style="margin-top:8px; border:1px solid #334155; border-radius:6px; padding:6px 8px;">
+      <summary style="cursor:pointer; color:#7dd3fc; font-size:13px;">🔗 合併撤站／新設站雨量資料（舊站＋新站接成長序列）</summary>
+      <div style="font-size:11.5px; color:#94a3b8; line-height:1.55; margin:6px 0;">
+        氣象署站撤站後常在附近新設站。將「舊站」併入「主站（新站）」後，兩站逐日／逐時資料依日期接合（重疊日期以主站為準），年最大值、頻率分析、雨型都用接合後的長序列；舊站不再單獨列入徐昇，面積由主站位置承擔。合併前會比對距離、高程與重疊期雨量，差異大時警告。僅列出已上傳雨量資料或已在上表的站。
+      </div>
+      <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+        <select id="mergeOld" style="flex:1; min-width:150px; margin:0;"></select>
+        <span style="color:#94a3b8;">併入 →</span>
+        <select id="mergeNew" style="flex:1; min-width:150px; margin:0;"></select>
+        <button id="btnMergeAdd" class="secondary" style="width:auto; margin:0; white-space:nowrap;">合併</button>
+      </div>
+      <div id="mergeCand" style="margin-top:6px; font-size:11.5px;"></div>
+      <div id="mergeList" style="margin-top:6px; font-size:12px;"></div>
+    </details>
   </div>
 
   </div>
@@ -1455,9 +1469,107 @@ redrawGrid();
 // 透過「純站名」或「站號」自動尋找對應的雨量資料庫紀錄 (徹底擺脫 C1F850 vs DC1F9C0 代號不合問題)
 function getStationDB(st) {
   if (!st) return null;
+  // 此站為合併主站時，回傳「舊站＋新站」接合後的資料（分析用）；上傳匯入請用 rawStationDB()
+  const mg = st.id && mergeOf(st.id);
+  if (mg) { const md = getMergedDb(mg); if (md) return md; }
   // 站名有大量重複 (遷站/汰換站與撤銷站同名)，故只以「站號」比對，不再用站名模糊比對
   if (st.id && stationRainDB[st.id]) return stationRainDB[st.id];
   return null;
+}
+function rawStationDB(st) { return st && st.id && stationRainDB[st.id] ? stationRainDB[st.id] : null; }
+
+// ============================================================================
+// 雨量站合併：撤站後新設之站，可將舊站＋新站的逐日／逐時資料接成一條長序列（以新站為主站）
+// ============================================================================
+let stationMerges = [];   // [{ newId, oldIds:[...] }]
+try { stationMerges = JSON.parse(localStorage.getItem('stationMerges') || '[]') || []; } catch (e) { stationMerges = []; }
+function saveStationMerges() { try { localStorage.setItem('stationMerges', JSON.stringify(stationMerges)); } catch (e) { } }
+function mergeOf(id) { return stationMerges.find(m => m.newId === id) || null; }
+function isMergedAway(st) { return !!st && stationMerges.some(m => m.oldIds.includes(st.id)); }
+function stationById(id) { return ALL_STATIONS.find(s => s.id === id) || null; }
+function dbLastYear(db) { const ks = Object.keys((db && db.ams24ByYear) || {}).map(Number); return ks.length ? Math.max(...ks) : 0; }
+const _mergedDbCache = {};
+function getMergedDb(m) {
+  const key = rainDataVersion + '|' + m.newId + '|' + m.oldIds.join(',');
+  if (_mergedDbCache[m.newId] && _mergedDbCache[m.newId].key === key) return _mergedDbCache[m.newId].db;
+  const ids = [...m.oldIds, m.newId];
+  const have = ids.filter(id => stationRainDB[id]);
+  let out = null;
+  if (have.length === 1) out = stationRainDB[have[0]];
+  else if (have.length > 1) {
+    // 由舊到新排序（以最後有年最大值之年份）；後者覆蓋前者，主站（新站）優先度最高
+    const order = have.slice().sort((a, b) => (a === m.newId) - (b === m.newId) || dbLastYear(stationRainDB[a]) - dbLastYear(stationRainDB[b]));
+    const dbs = order.map(id => stationRainDB[id]);
+    const dm = {}, hm = new Map(), arr = {};
+    let anyDaily = false;
+    dbs.forEach(db => {
+      if (db.hasDaily && db.dailyByDate) { Object.assign(dm, db.dailyByDate); anyDaily = true; }
+      if (db.hourly && db.hourly.t) for (let i = 0; i < db.hourly.t.length; i++) hm.set(db.hourly.t[i], db.hourly.v[i]);
+      if (db.hourlyArrAms) Object.assign(arr, db.hourlyArrAms);
+    });
+    const ns = stationById(m.newId);
+    out = { stName: (ns ? ns.name : m.newId) + '（合併站）', hasDaily: anyDaily, hasHourly: false, dailyDerived: false,
+      dailyLabel: '未上傳', hourlyLabel: '預設同位序', meanAnnualP: 3000, annualPByYear: {}, ams24ByYear: {},
+      stormPattern24: [...DEFAULT_SAME_RANK_PCT_24HR], dailyByDate: anyDaily ? dm : {}, hourlyArrAms: arr, mergedFrom: order.slice() };
+    if (hm.size) {
+      const ts = Array.from(hm.keys()).sort((a, b) => a - b);
+      out.hourly = { t: Int32Array.from(ts), v: Float32Array.from(ts.map(t => hm.get(t))) };
+    }
+    recomputeCodisStats(out);   // 接合後的完整序列重算年最大值（跨站分年之年份亦可湊足）
+    // 接合序列無法湊足的年份，改取各來源站自身的年統計（新站優先）
+    dbs.forEach(db => {
+      Object.entries(db.ams24ByYear || {}).forEach(([y, v]) => { if (out.ams24ByYear[y] == null) out.ams24ByYear[y] = v; });
+      Object.entries(db.annualPByYear || {}).forEach(([y, v]) => { if (out.annualPByYear[y] == null) out.annualPByYear[y] = v; });
+    });
+    const an = Object.values(out.annualPByYear); if (an.length) out.meanAnnualP = +(an.reduce((a, b) => a + b, 0) / an.length).toFixed(1);
+    const nm = order.map(id => { const x = stationById(id); return x ? x.name : id; }).join('＋');
+    const ny = Object.keys(out.ams24ByYear).length;
+    if (out.hasDaily) out.dailyLabel = `日資料(合併 ${nm}；年最大 ${ny} 年)`;
+    if (out.hasHourly) out.hourlyLabel = `時資料(合併 ${nm})`;
+  }
+  _mergedDbCache[m.newId] = { key, db: out };
+  return out;
+}
+function kmBetween(a, b) {
+  const kx = 111.32 * Math.cos(a.lat * Math.PI / 180), ky = 110.57;
+  return Math.hypot((a.lon - b.lon) * kx, (a.lat - b.lat) * ky);
+}
+function pearson(x, y) {
+  const n = x.length; if (n < 3) return NaN;
+  const mx = x.reduce((a, b) => a + b, 0) / n, my = y.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; syy += (y[i] - my) ** 2; }
+  return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : NaN;
+}
+// 合併前品質比對：距離、高程差、重疊期間日雨量／年最大值之比值與相關
+function checkMergePair(newSt, oldSt) {
+  const a = rawStationDB(newSt), b = rawStationDB(oldSt);
+  const info = [], warns = [];
+  const dist = kmBetween(newSt, oldSt), dz = (newSt.elev || 0) - (oldSt.elev || 0);
+  info.push(`兩站相距 ${dist.toFixed(1)} km，高程差 ${dz.toFixed(0)} m`);
+  if (dist > 5) warns.push(`兩站相距 ${dist.toFixed(1)} km（> 5 km），降雨特性可能不同`);
+  if (Math.abs(dz) > 300) warns.push(`兩站高程差 ${dz.toFixed(0)} m（> 300 m）`);
+  if (!a || !b) { warns.push('新站或舊站尚未上傳雨量資料，無法做重疊期間比對'); return { info, warns, dist, dz }; }
+  const ya = Object.keys(a.ams24ByYear || {}), yb = Object.keys(b.ams24ByYear || {});
+  const ov = ya.filter(y => yb.includes(y));
+  if (ov.length) {
+    const xa = ov.map(y => a.ams24ByYear[y]), xb = ov.map(y => b.ams24ByYear[y]);
+    const ratio = xa.reduce((p, c) => p + c, 0) / xb.reduce((p, c) => p + c, 0);
+    info.push(`年最大值重疊 ${ov.length} 年，新站／舊站平均比 ${ratio.toFixed(2)}`);
+    if (ov.length >= 4 && (ratio < 0.7 || ratio > 1.4)) warns.push(`年最大值重疊期新／舊站比值 ${ratio.toFixed(2)}，差異偏大`);
+  } else info.push('兩站年最大值無重疊年份（接續型），無法比對');
+  if (a.dailyByDate && b.dailyByDate) {
+    const xs = [], ys = [];
+    for (const [k, v] of Object.entries(a.dailyByDate)) { const w = b.dailyByDate[k]; if (w != null) { xs.push(v); ys.push(w); } }
+    if (xs.length >= 30) {
+      const sa = xs.reduce((p, c) => p + c, 0), sb = ys.reduce((p, c) => p + c, 0);
+      const r = pearson(xs, ys), ratio = sb > 0 ? sa / sb : NaN;
+      info.push(`日雨量重疊 ${xs.length} 日，新／舊站總量比 ${isFinite(ratio) ? ratio.toFixed(2) : '—'}，相關係數 r = ${isFinite(r) ? r.toFixed(2) : '—'}`);
+      if (isFinite(ratio) && (ratio < 0.8 || ratio > 1.25)) warns.push(`日雨量重疊期總量比 ${ratio.toFixed(2)}（0.8～1.25 為宜）`);
+      if (isFinite(r) && r < 0.8) warns.push(`日雨量重疊期相關係數 ${r.toFixed(2)}（< 0.8）`);
+    }
+  }
+  return { info, warns, dist, dz };
 }
 
 // 該站是否已有可用於頻率分析的 CODiS 雨量資料 (需有歷年最大 24hr 雨量樣本)
@@ -1488,7 +1600,7 @@ function renderStationMarkers() {
       color: "#fff",
       weight: hasLoaded ? 2 : 1,
       fillOpacity: 0.95
-    }).bindTooltip(`${st.name}${st.withdrawn ? ' (撤銷站)' : ''} (${st.id})<br>${st.county} · 高程: ${st.elev}m<br>${hasLoaded ? '✔ 已有雨量資料' : '可上傳雨量 Excel'}`).addTo(layerStations);
+    }).bindTooltip(`${st.name}${st.withdrawn ? ' (撤銷站)' : ''} (${st.id})<br>${st.county} · 高程: ${st.elev}m<br>${hasLoaded ? '✔ 已有雨量資料' : '可上傳雨量 Excel'}${isMergedAway(st) ? '<br>🔗 已併入新站（不單獨列入徐昇）' : (mergeOf(st.id) ? '<br>🔗 合併主站（含舊站資料）' : '')}`).addTo(layerStations);
   });
 
   layerDebrisStreams.clearLayers();
@@ -2221,10 +2333,10 @@ function buildThiessenForWatershed(watershedFeature, totalAreaKm2) {
   };
   let intersectErrors = 0;
   // 1) 氣象署 (CODiS) 站：與原做法相同
-  currentThiessenList = clipStations(ALL_STATIONS.filter(s => !isWraStation(s)), () => true);
+  currentThiessenList = clipStations(ALL_STATIONS.filter(s => !isWraStation(s) && !isMergedAway(s)), () => true);
   // 2) 水利署站：與 CODiS 站一起切割，凡徐昇區落在集水區內者列入清單（預設不勾選，不影響原 CODiS 權重）
   if (wraEnabled()) {
-    const wraHits = clipStations(ALL_STATIONS, isWraStation);
+    const wraHits = clipStations(ALL_STATIONS.filter(s => !isMergedAway(s)), isWraStation);
     wraHits.forEach(w => currentThiessenList.push(w));
   }
 
@@ -2394,7 +2506,7 @@ function applyStationRule() {
     // 2) 範圍內沒有符合者 → 由集水區邊界向外每 5 km 擴大尋找
     const vtx = turf.coordAll(feature);
     const have = new Set(currentThiessenList.map(s => s.id));
-    const pool = ALL_STATIONS.filter(s => !isWraStation(s) && !s.withdrawn && !have.has(s.id) && pass(s));
+    const pool = ALL_STATIONS.filter(s => !isWraStation(s) && !s.withdrawn && !isMergedAway(s) && !have.has(s.id) && pass(s));
     const [bx0, by0, bx1, by1] = turf.bbox(feature), m = STATION_EXPAND_MAX_KM / 100 + 0.05;
     const near = pool.filter(s => s.lon >= bx0 - m && s.lon <= bx1 + m && s.lat >= by0 - m && s.lat <= by1 + m)
       .map(s => ({ s, d: distToWatershedKm(s, vtx) })).sort((a, b) => a.d - b.d);
@@ -2413,7 +2525,68 @@ function applyStationRule() {
   }
   if (panel) panel.innerHTML = notes.map(n => `<div style="color:${n.startsWith('✔') ? '#4ade80' : '#fbbf24'};">${n}</div>`).join('') + `<div style="color:#94a3b8;">規則：未撤銷站，且有效年最大值年數 ≥ ${STATION_MIN_YEARS} 年；尚未上傳資料之站暫視為可用，上傳後請按下方按鈕重新判定。</div>`;
 }
+// ---- 合併雨量站介面 ----
+function mergeStationLabel(st) { return `${st.name}${st.withdrawn ? '(撤銷站)' : ''}（${st.id}；${st.elev}m）`; }
+function mergeCandidateStations() {
+  const ids = new Set(Object.keys(stationRainDB));
+  currentThiessenList.forEach(s => ids.add(s.id));
+  stationMerges.forEach(m => { ids.add(m.newId); m.oldIds.forEach(i => ids.add(i)); });
+  return [...ids].map(stationById).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant') || a.id.localeCompare(b.id));
+}
+function refreshMergePanel() {
+  const so = document.getElementById('mergeOld'), sn = document.getElementById('mergeNew');
+  if (!so || !sn) return;
+  const list = mergeCandidateStations();
+  const opt = list.map(st => `<option value="${st.id}">${mergeStationLabel(st)}</option>`).join('');
+  const vo = so.value, vn = sn.value;
+  so.innerHTML = '<option value="">舊站（撤銷／較早的站）</option>' + opt; sn.innerHTML = '<option value="">主站（新站／現存站）</option>' + opt;
+  if (vo) so.value = vo; if (vn) sn.value = vn;
+  // 自動偵測：同機關、同站名（去括號編號）且尚未合併者，舊→新依最後有資料年份排序
+  const groups = new Map();
+  list.forEach(st => { const k = st.org + '|' + stationBaseName(st.name); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(st); });
+  const cands = [];
+  groups.forEach(g => {
+    if (g.length < 2) return;
+    const sorted = g.slice().sort((a, b) => (a.withdrawn ? 0 : 1) - (b.withdrawn ? 0 : 1) || dbLastYear(stationRainDB[a.id]) - dbLastYear(stationRainDB[b.id]));
+    const nw = sorted[sorted.length - 1];
+    sorted.slice(0, -1).forEach(o => { if (!isMergedAway(o) && !mergeOf(o.id) && !(mergeOf(nw.id) && mergeOf(nw.id).oldIds.includes(o.id))) cands.push({ o, nw }); });
+  });
+  const cd = document.getElementById('mergeCand');
+  cd.innerHTML = cands.length ? '<div style="color:#fbbf24;">自動偵測到同名／同機關可合併的站：</div>' + cands.map((c, i) =>
+    `<div style="margin:2px 0;">${mergeStationLabel(c.o)} → ${mergeStationLabel(c.nw)} <button class="secondary btn-merge-cand" data-i="${i}" style="width:auto; margin:0 0 0 6px; padding:1px 8px; font-size:11.5px;">套用</button></div>`).join('') : '';
+  cd.querySelectorAll('.btn-merge-cand').forEach(b => b.addEventListener('click', () => { const c = cands[+b.dataset.i]; applyStationMerge(c.o.id, c.nw.id); }));
+  const ml = document.getElementById('mergeList');
+  ml.innerHTML = stationMerges.length ? '<div style="color:#4ade80;">已合併：</div>' + stationMerges.map((m, i) => {
+    const ns = stationById(m.newId), db = getMergedDb(m), ny = db && db.ams24ByYear ? Object.keys(db.ams24ByYear).length : 0;
+    return `<div style="margin:2px 0;">${m.oldIds.map(id => { const o = stationById(id); return o ? mergeStationLabel(o) : id; }).join('、')} → <strong>${ns ? mergeStationLabel(ns) : m.newId}</strong>（合併後年最大值 ${ny} 年）<button class="secondary btn-merge-del" data-i="${i}" style="width:auto; margin:0 0 0 6px; padding:1px 8px; font-size:11.5px;">解除</button></div>`;
+  }).join('') : '<div style="color:#94a3b8;">尚未合併任何站。</div>';
+  ml.querySelectorAll('.btn-merge-del').forEach(b => b.addEventListener('click', () => { stationMerges.splice(+b.dataset.i, 1); afterMergeChange(); }));
+}
+function afterMergeChange() {
+  saveStationMerges(); rainDataVersion++;
+  if (currentWatershedParams && currentWatershedParams.feature) buildThiessenForWatershed(currentWatershedParams.feature, currentWatershedParams.A_km2);
+  else refreshMergePanel();
+}
+function applyStationMerge(oldId, newId) {
+  const o = stationById(oldId), n = stationById(newId);
+  if (!o || !n) { setStatus('請先選擇舊站與主站。', 'warn'); return; }
+  if (oldId === newId) { setStatus('舊站與主站不可相同。', 'warn'); return; }
+  if (mergeOf(oldId) || isMergedAway(n)) { setStatus('所選舊站已是其他站的主站，或主站已被併入別站，請先解除再合併。', 'warn'); return; }
+  const chk = checkMergePair(n, o);
+  const msg = `合併「${mergeStationLabel(o)}」併入「${mergeStationLabel(n)}」\n\n` + chk.info.join('\n') + (chk.warns.length ? '\n\n⚠️ 注意：\n' + chk.warns.map(w => '・' + w).join('\n') + '\n\n仍要合併嗎？' : '\n\n確定合併？');
+  if (!window.confirm(msg)) return;
+  let m = mergeOf(newId);
+  if (!m) { m = { newId, oldIds: [] }; stationMerges.push(m); }
+  if (!m.oldIds.includes(oldId)) m.oldIds.push(oldId);
+  m.checks = undefined;
+  afterMergeChange();
+  setStatus(`✅ 已合併：${o.name}（${o.id}）併入 ${n.name}（${n.id}）。${chk.info.join('；')}` + (chk.warns.length ? `<br>⚠️ ${chk.warns.join('；')}` : ''), chk.warns.length ? 'warn' : 'ok');
+}
+document.getElementById('btnMergeAdd').addEventListener('click', () => applyStationMerge(document.getElementById('mergeOld').value, document.getElementById('mergeNew').value));
+document.getElementById('mergeBox').addEventListener('toggle', refreshMergePanel);
+
 function refreshThiessenUI() {
+  refreshMergePanel();
   const tbody = document.getElementById('thiessenBody');
   tbody.innerHTML = '';
   if (currentThiessenList.length === 0) {
@@ -2584,7 +2757,7 @@ function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fil
   }
 
   const dbKey = stMeta.id || stMeta.name;
-  const existing = getStationDB(stMeta) || {
+  const existing = rawStationDB(stMeta) || {
     stName: stMeta.name,
     hasDaily: false, hasHourly: false, dailyLabel: "未上傳", hourlyLabel: "預設同位序",
     meanAnnualP: 3000, annualPByYear: {}, ams24ByYear: {}, stormPattern24: [...DEFAULT_SAME_RANK_PCT_24HR]
@@ -2743,7 +2916,7 @@ function importCodisCsv(rows, fileName, forced, opt = {}) {
     warn = `檔內站名「${nmRaw}」與站籍「${st.name}」不同，請確認`;
   }
   if (!st) return { skipped: true, name: `${nmRaw || idRaw}（${idRaw} 不在 CODiS 測站清單）` };
-  const db = getStationDB(st) || { stName: st.name, hasDaily: false, hasHourly: false, dailyLabel: "未上傳", hourlyLabel: "預設同位序", meanAnnualP: 3000, annualPByYear: {}, ams24ByYear: {}, stormPattern24: [...DEFAULT_SAME_RANK_PCT_24HR] };
+  const db = rawStationDB(st) || { stName: st.name, hasDaily: false, hasHourly: false, dailyLabel: "未上傳", hourlyLabel: "預設同位序", meanAnnualP: 3000, annualPByYear: {}, ams24ByYear: {}, stormPattern24: [...DEFAULT_SAME_RANK_PCT_24HR] };
   db.stName = st.name;
   const ptime = str => { const m = String(str).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):?(\d{2})?)?/); return m ? { y: +m[1], m: +m[2], d: +m[3], H: m[4] ? +m[4] : 0 } : null; };
   const years = new Set();
@@ -5658,7 +5831,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </div>
 
   <h3>二、集水區控制點位置、雨量站擇定與徐昇面積權重</h3>
-  <p>本集水區控制點（出水口）位於 <strong>TWD97 二度分帶座標 X = ${twd.x} m、Y = ${twd.y} m（WGS84 經度 ${twd.lon}°E、緯度 ${twd.lat}°N）</strong>，經數值高程模型（DEM）自動回溯劃定，集水區總面積為 <strong>${w.A_ha.toFixed(1)} ha（${w.A_km2.toFixed(2)} km²）</strong>。透過徐昇多邊形法（Thiessen Polygon）針對選用之中央氣象署雨量站重新切割空間控制面積與權重（選用站控制面積總和調整為 100.0%）如圖 2 及表 1 所示，本次分析採納 <strong>${stNamesStr}</strong> 之加權雨量紀錄作為後續水文頻率與雨型分析依據。</p>
+  <p>本集水區控制點（出水口）位於 <strong>TWD97 二度分帶座標 X = ${twd.x} m、Y = ${twd.y} m（WGS84 經度 ${twd.lon}°E、緯度 ${twd.lat}°N）</strong>，經數值高程模型（DEM）自動回溯劃定，集水區總面積為 <strong>${w.A_ha.toFixed(1)} ha（${w.A_km2.toFixed(2)} km²）</strong>。透過徐昇多邊形法（Thiessen Polygon）針對選用之中央氣象署雨量站重新切割空間控制面積與權重（選用站控制面積總和調整為 100.0%）如圖 2 及表 1 所示，本次分析採納 <strong>${stNamesStr}</strong> 之加權雨量紀錄作為後續水文頻率與雨型分析依據。${(() => { const ms = activeStations.map(s => mergeOf(s.id)).filter(Boolean); return ms.length ? ms.map(m => { const ns = stationById(m.newId), os = m.oldIds.map(i => stationById(i)).filter(Boolean); return `<strong>${ns ? ns.name : m.newId}站</strong>之雨量序列係由${os.map(o => `${o.name}站（${o.id}${o.withdrawn ? '，已撤銷' : ''}）`).join('、')}與該站依日期接合而成（重疊日期以${ns ? ns.name : '主站'}站為準），已比對兩站距離、高程與重疊期雨量。`; }).join('') : ''; })()}</p>
 
   ${mapImgUrl ? `
   <div class="fig-box">
