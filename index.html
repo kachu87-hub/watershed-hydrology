@@ -341,7 +341,7 @@
     <div style="border:1px solid #334155; border-radius:6px; padding:6px; margin:6px 0;">
       <label>雨型（24 小時時間分配）</label>
       <select id="select_stormType">
-        <option value="AUTO" selected>自動（Horner 交替區塊；時間間距依 t<sub>c</sub>，見下方「短延時時距」）</option>
+        <option value="AUTO" selected>預設：同位序法（集中型）</option>
         <option value="SAMERANK">同位序法（集中型，規劃報告採用）</option>
         <option value="ALTBLOCK">交替區塊法（依降雨強度公式）</option>
         <option value="CHICAGO">Chicago 法（Keifer–Chu）</option>
@@ -4118,11 +4118,15 @@ function buildBasinRainBasis(useList) {
     };
   }
 
-  if (all.length > 0 && hItems.length === all.length) {
+  const wAll = all.reduce((a, x) => a + x.w, 0), wHour = hItems.reduce((a, x) => a + x.w, 0);
+  const HOURLY_MIN_WEIGHT = 0.9;   // 有逐時資料之站徐昇權重合計 ≥ 90% 時，樣本一律用逐時連續 24 小時最大值（其餘站不納入、權重重新換算）
+  if (all.length > 0 && hItems.length > 0 && wAll > 0 && wHour / wAll >= HOURLY_MIN_WEIGHT) {
     res.method = "hourly";
     res.years = res.hourly.wins.map(w => String(w.year));
     res.sample24 = res.hourly.wins.map(w => +w.total.toFixed(1));
-    res.methodNote = "各站逐時雨量依徐昇權重加成流域逐時雨量，逐年取連續 24 小時累積雨量之最大值（不需一日→24 小時換算）。";
+    const exc = res.hourly.excluded;
+    res.methodNote = "各站逐時雨量依徐昇權重加成流域逐時雨量，逐年取連續 24 小時累積雨量之最大值（不需一日→24 小時換算）。" +
+      (exc.length ? `因有逐時資料之站權重合計 ${(wHour / wAll * 100).toFixed(1)}%（≥ ${HOURLY_MIN_WEIGHT * 100}%），${exc.map(x => `${x.name}${x.withdrawn ? '(撤銷站)' : ''}（權重 ${(x.weight * 100).toFixed(1)}%，無逐時資料）`).join('、')}不納入樣本，其餘站權重重新換算為 100%。` : '');
   } else if (all.length > 0 && dItems.length === all.length) {
     const wS = all.reduce((a, x) => a + x.w, 0);
     const rows = annualMaxDailyWeighted(all.map(x => ({ db: x.db, w: x.w / wS })));
@@ -4203,7 +4207,7 @@ function readStormParams() {
   let t = g('select_stormType') || "AUTO", auto = false;
   if (t === "AUTO") {
     auto = true;
-    t = "HORNER10";  // 水保手冊調-4-22／出流管制技術手冊 §4.3：設計雨型採 Horner 公式交替區塊法；時距依 tc 或固定 10 分
+    t = "SAMERANK";  // 預設雨型：同位序法（集中型）；Horner 交替區塊法等其他雨型可於選單改選，並列於雨型比較表
   }
   return { type: STORM_TYPES[t] ? t : "SAMERANK", auto, r: parseFloat(g('input_chicago_r')) || 0.4, huffQ: g('select_huffQ') || "AUTO" };
 }
@@ -4721,7 +4725,7 @@ function runFrequencyAndHydrology() {
     stormTyped.note = `依${idfLabel}，各重現期距各自以 I(t) 計算 t = ${stepLabelOf(dsShort)}、…、24 小時之累積雨量，逐時段相減得時段雨量，最大者置於中間、其餘依交替區塊法右大左小排列（出流管制技術手冊 109.05 第 4.3 節；時距${dsShort === 1 / 6 ? '依手冊取 10 分鐘' : '依 t<sub>c</sub> = ' + rz0.Tc_hr.toFixed(2) + ' hr 之規則取 ' + dsShort + ' hr'}）；24 小時總雨量 P<sub>24</sub> 取自頻率分析成果。歷線之單位降雨延時 D 即採此時距。` + (idfSrc.hornerWanted && idfSrc.src === 'DIMLESS' ? '（尚未選定 Horner 測站，暫以無因次公式計算）' : '') + (idfSrc.src === 'HORNER' && HORNER_TS.some(T => !idfSrc.p[T]) ? `（Horner 參數於 ${HORNER_TS.filter(T => !idfSrc.p[T]).join('、')} 年無有效值，該重現期改用無因次公式）` : '');
   }
   stormPattern24 = [...stormTyped.pattern];
-  { const n = document.getElementById('stormTypeNote'); if (n) n.innerHTML = `採用：<strong>${stormTyped.label}</strong>${stormPrm.auto ? `（自動：依水保手冊／出流管制手冊採 Horner 交替區塊法，t<sub>c</sub> = ${rz0.Tc_hr.toFixed(2)} hr，時距 ${stepLabelOf(dsShort)}）` : ''}。${stormTyped.note}`; }
+  { const n = document.getElementById('stormTypeNote'); if (n) n.innerHTML = `採用：<strong>${stormTyped.label}</strong>${stormPrm.auto ? '（預設雨型；可於上方選單改選 Horner 交替區塊法等其他雨型，各雨型洪峰比較見雨型比較表）' : ''}。${stormTyped.note}`; }
   const ownStorm = { pattern: [...stormPattern24], calc: stormCalc, events: selectedEvents, typed: stormTyped };
   const multiActive = isMultiMode() && !!activePointId && !!multiShared;
   let usedEvents = selectedEvents;
@@ -4840,11 +4844,12 @@ function runFrequencyAndHydrology() {
   // 雨型比較：同一設計雨量下各雨型之洪峰（單位歷線法）
   const cmpDefs = [{ label: `本次採用（${stormTyped.label}${multiActive && multiShared.pattern && !isShortStorm ? '；多點共用' : ''}）`, pattern: stormPattern24, fine: isShortStorm ? shortFineFn(targetT) : null }];
   const addCmp = (label, pattern, fine) => { if (pattern) cmpDefs.push({ label, pattern, fine: fine || null }); };
-  addCmp(STORM_TYPES.SAMERANK, sameRankPattern24);
-  addCmp(STORM_TYPES.ALTBLOCK, computeAltBlockPattern(P_ann0));
-  addCmp(`${STORM_TYPES.CHICAGO}（r=${stormPrm.r}）`, computeChicagoPattern(P_ann0, stormPrm.r));
-  { const h = computeHuffPattern(selectedEvents.map(e => e.hourly), stormPrm.huffQ); if (h) addCmp(`${STORM_TYPES.HUFF}（第${h.quartile}四分位）`, h.pattern); }
-  { const e = computeEventPattern(selectedEvents); if (e) addCmp(`${STORM_TYPES.EVENT}（${e.event.startLabel.slice(0, 10)}）`, e.pattern); }
+  const adoptedT = stormPrm.type;   // 本次採用之雨型不再於比較列重複出現
+  if (adoptedT !== 'SAMERANK') addCmp(STORM_TYPES.SAMERANK, sameRankPattern24);
+  if (adoptedT !== 'ALTBLOCK') addCmp(STORM_TYPES.ALTBLOCK, computeAltBlockPattern(P_ann0));
+  if (adoptedT !== 'CHICAGO') addCmp(`${STORM_TYPES.CHICAGO}（r=${stormPrm.r}）`, computeChicagoPattern(P_ann0, stormPrm.r));
+  if (adoptedT !== 'HUFF') { const h = computeHuffPattern(selectedEvents.map(e => e.hourly), stormPrm.huffQ); if (h) addCmp(`${STORM_TYPES.HUFF}（第${h.quartile}四分位）`, h.pattern); }
+  if (adoptedT !== 'EVENT') { const e = computeEventPattern(selectedEvents); if (e) addCmp(`${STORM_TYPES.EVENT}（${e.event.startLabel.slice(0, 10)}）`, e.pattern); }
   if (!isShortStorm) { const fT = shortFineFn(targetT); addCmp(`${STORM_TYPES.HORNER10}（${stepLabelOf(dsShort)}；${idfSrc.src === 'HORNER' ? 'Horner' : '無因次公式'}）`, aggregateHourly(fT.pct, dsShort), fT); }
   // 雨型檢核：tc 視窗內最大雨量 ÷ 同重現期 IDF 公式 tc 延時雨量（<1 表示雨型在關鍵延時內雨量集中度不足）
   const winCheck = c => {
@@ -5814,7 +5819,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
       <rect x="270" y="36" width="130" height="74" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
       <text x="335" y="58" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">暴雨量分析</text>
       <text x="335" y="78" text-anchor="middle" font-size="11.5" fill="#334155">1. 暴雨頻率與檢定</text>
-      <text x="335" y="96" text-anchor="middle" font-size="11.5" fill="#334155">2. 同位序雨型設計</text>
+      <text x="335" y="96" text-anchor="middle" font-size="${(stormTagOf(d.stormTyped).name.length > 6) ? 9.5 : 11.5}" fill="#334155">2. ${stormTagOf(d.stormTyped).name}雨型設計</text>
       <line x1="400" y1="73" x2="430" y2="73" stroke="#1e293b" stroke-width="2" marker-end="url(#arrow)"/>
 
       <rect x="430" y="25" width="155" height="96" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
@@ -5901,7 +5906,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <h3>五、雨型設計（${d.stormTyped.label}）</h3>
   <p>本次採用雨型：<strong>${d.stormTyped.label}</strong>。${d.stormTyped.note}${d.stormTyped.type !== 'SAMERANK' ? '以下並保留同位序法（規劃報告採用之集中型）之計算過程供對照，雨型比較見表 5-4。' : ''}</p>
   ${d.stormTyped.type === 'SAMERANK' ? `<p>本集水區之雨型設計參採同位序法進行，將每時段雨量所佔 24 小時總雨量之百分率求出並按同位序排列（最大值居於第 12 小時，其餘依序向兩側遞減），時間分配型態如圖 3 及附錄表 A-6 所示，計算步驟說明如下。</p>` : ''}
-  <p><strong>雨型選用依據：</strong>水土保持手冊（調-4-22）列同位序平均法、序率馬可夫雨型與 Horner 公式雨型法為常用設計雨型，計算例採 Horner 公式雨型法（以 t<sub>c</sub> 決定時距：t<sub>c</sub> ＜ 1 hr 為 5 分鐘，1–2 hr 為 10 分鐘，依此類推至 ≥ 6 hr 為 60 分鐘；以各延時累積雨量相減後，最大值置中、依右大左小排列）；出流管制技術手冊 §4.3 亦規定採 Horner 公式、時間刻度 10 分鐘之交替區塊法。逕流分擔技術手冊（II-8）則要求沿用治理計畫所設定之設計雨型，並可另以歷史颱洪事件之實測雨型比較。據此，本報告以 Horner 公式交替區塊法為設計雨型（本次時距：${d.stormTyped.dsShort ? (d.stormTyped.dsShort < 1 - 1e-9 ? Math.round(d.stormTyped.dsShort * 60) + ' 分鐘' : d.stormTyped.dsShort + ' hr') : '1 hr'}），同位序法、Chicago 法、Huff 法及實測事件雨型僅供敏感度比較（表 5-4）。</p>
+  <p><strong>雨型選用依據：</strong>水土保持手冊（調-4-22）列同位序平均法、序率馬可夫雨型與 Horner 公式雨型法為常用設計雨型，計算例採 Horner 公式雨型法（以 t<sub>c</sub> 決定時距：t<sub>c</sub> ＜ 1 hr 為 5 分鐘，1–2 hr 為 10 分鐘，依此類推至 ≥ 6 hr 為 60 分鐘；以各延時累積雨量相減後，最大值置中、依右大左小排列）；出流管制技術手冊 §4.3 亦規定採 Horner 公式、時間刻度 10 分鐘之交替區塊法。逕流分擔技術手冊（II-8）則要求沿用治理計畫所設定之設計雨型，並可另以歷史颱洪事件之實測雨型比較。據此，本報告以${d.stormTyped.label}為設計雨型${d.stormTyped.type === 'HORNER10' && d.stormTyped.dsShort ? '（本次時距：' + (d.stormTyped.dsShort < 1 - 1e-9 ? Math.round(d.stormTyped.dsShort * 60) + ' 分鐘' : d.stormTyped.dsShort + ' hr') + '）' : ''}，${[...new Set((d.patternCompare || []).slice(1).map(c => c.label.replace(/（[^）]*）/g, '')))].join('、')}雨型僅供敏感度比較（表 5-4）。</p>
   ${rankStepHTML}
 
   <div class="fig-box">
@@ -5984,7 +5989,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     </tbody>
   </table>
 
-  <p><strong>SCS 無因次單位歷線法（比較用）：</strong>依排水計畫書規定之 SCS 無因次單位歷線，T<sub>lag</sub> = 0.6 t<sub>c</sub> = 0.6 × ${w.Tc_hr.toFixed(2)} = ${scs.Tlag.toFixed(2)} hr；T<sub>p</sub> = t<sub>r</sub>/2 + T<sub>lag</sub> = ${scs.D_unit.toFixed(2)}/2 + ${scs.Tlag.toFixed(2)} = ${scs.Tp.toFixed(2)} hr（t<sub>r</sub> 取單位降雨延時 D = 0.135 t<sub>c</sub>）；Q<sub>p</sub> = 0.208 A R<sub>e</sub> / T<sub>p</sub>（R<sub>e</sub> = 10 mm 時為 ${scs.unitQp_10mm.toFixed(1)} cms）；基期 T<sub>b</sub> = 2.67 T<sub>p</sub> = ${scs.Tb.toFixed(2)} hr。以時間比 t/T<sub>p</sub> 與流量比 q/Q<sub>p</sub> 之無因次曲線（附錄表 A-7）轉換為各時刻流量，逐時有效降雨以 10 個子脈衝依時間延遲疊加；曲線下面積為 ${scs.areaRatio.toFixed(3)} T<sub>p</sub>Q<sub>p</sub>（三角形為 1.335）。有效降雨：${effNote}。<span style="color:#b45309;">本表比值係採 USDA NRCS National Engineering Handbook Part 630 之標準座標，水利署排水計畫書附表五原文未能取得核對，正式送審前請與附表五比對。</span></p>
+  <p><strong>SCS 無因次單位歷線法（比較用）：</strong>依排水計畫書規定之 SCS 無因次單位歷線，T<sub>lag</sub> = 0.6 t<sub>c</sub> = 0.6 × ${w.Tc_hr.toFixed(2)} = ${scs.Tlag.toFixed(2)} hr；T<sub>p</sub> = t<sub>r</sub>/2 + T<sub>lag</sub> = ${scs.D_unit.toFixed(2)}/2 + ${scs.Tlag.toFixed(2)} = ${scs.Tp.toFixed(2)} hr（t<sub>r</sub> 取單位降雨延時 D = 0.135 t<sub>c</sub>）；Q<sub>p</sub> = 0.208 A R<sub>e</sub> / T<sub>p</sub>（R<sub>e</sub> = 10 mm 時為 ${scs.unitQp_10mm.toFixed(1)} cms）；基期 T<sub>b</sub> = 2.67 T<sub>p</sub> = ${scs.Tb.toFixed(2)} hr。以時間比 t/T<sub>p</sub> 與流量比 q/Q<sub>p</sub> 之無因次曲線（附錄表 A-7）轉換為各時刻流量，逐時有效降雨以 10 個子脈衝依時間延遲疊加；曲線下面積為 ${scs.areaRatio.toFixed(3)} T<sub>p</sub>Q<sub>p</sub>（三角形為 1.335）。有效降雨：${effNote}。</p>
   <div class="caption">表 8-3 修正三角型與 SCS 無因次單位歷線洪峰流量比較（單位：cms；有效雨量：${d.CN_val ? 'CN = ' + d.CN_val : 'φ = ' + d.phi_val + ' mm/hr'}）</div>
   <table><thead><tr><th>方法</th><th>2年</th><th>5年</th><th>10年</th><th>25年</th><th>50年</th><th>100年</th><th>200年</th></tr></thead><tbody>
     <tr><td style="text-align:center;">修正三角型 (△-${stormTagOf(d.stormTyped).ab})</td>${d.rowTri.map(q => `<td>${q.toFixed(2)}</td>`).join('')}</tr>
@@ -6008,15 +6013,15 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
         <td rowspan="3" style="text-align:center;">X=${twd.x}<br>Y=${twd.y}</td>
         <td rowspan="3">${w.A_ha.toFixed(1)}</td>
         <td rowspan="3">${w.Tc_hr.toFixed(2)}</td>
-        <td style="text-align:center;">合-無</td>
+        <td style="text-align:center;">合理化公式<br>（無因次強度）</td>
         ${d.rowRat.map(q => `<td>${!isLarge ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}<br>(${(q/w.A_km2).toFixed(2)})</td>`).join('')}
       </tr>
       <tr>
-        <td style="text-align:center;">△-${stormTagOf(d.stormTyped).ab}</td>
+        <td style="text-align:center;">修正三角形<br>（${stormTagOf(d.stormTyped).name}）</td>
         ${d.rowTri.map(q => `<td>${isLarge && d.uhMethod === 'TRI' ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}<br>(${(q/w.A_km2).toFixed(2)})</td>`).join('')}
       </tr>
       <tr>
-        <td style="text-align:center;">S-${stormTagOf(d.stormTyped).ab}</td>
+        <td style="text-align:center;">SCS 無因次<br>（${stormTagOf(d.stormTyped).name}）</td>
         ${d.rowScs.map(q => `<td>${isLarge && d.uhMethod === 'SCS' ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}<br>(${(q/w.A_km2).toFixed(2)})</td>`).join('')}
       </tr>
     </tbody>
@@ -6075,7 +6080,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     <thead><tr><th>時間 (hr)</th><th>雨型百分比 (%)</th><th>擬採序位</th><th>${d.targetT}年重現期分配雨量 (mm)</th></tr></thead>
     <tbody>${table5Rows}</tbody>
   </table>
-  <div class="caption">表 A-7 SCS 無因次單位歷線座標（t/T<sub>p</sub>、q/Q<sub>p</sub>）</div>
+  <div class="caption">表 A-7 SCS 無因次單位歷線座標（t/T<sub>p</sub>、q/Q<sub>p</sub>；座標採 USDA NRCS National Engineering Handbook Part 630）</div>
   <table><thead><tr>${[0,1,2].map(() => '<th>t/T<sub>p</sub></th><th>q/Q<sub>p</sub></th>').join('')}</tr></thead><tbody>${(() => { const R = SCS_UH_RATIOS, n = Math.ceil(R.length / 3); let o = ''; for (let i = 0; i < n; i++) o += '<tr>' + [0,1,2].map(k => R[i + k * n] ? `<td>${R[i + k * n][0].toFixed(1)}</td><td>${R[i + k * n][1].toFixed(3)}</td>` : '<td></td><td></td>').join('') + '</tr>'; return o; })()}</tbody></table>
 
   ${appendixFreqHTML}
@@ -6425,7 +6430,7 @@ function multiPointReportHTML(pts, mapImgs) {
   <table><thead><tr><th>機率分布</th><th>卡方值</th><th>檢定</th><th>SE序位和</th>${th}</tr></thead><tbody>${fr}</tbody></table>
   <div class="caption">表 A-${k + 1}-3 ${pt.name} 各方法洪峰流量（cms）</div>
   <table><thead><tr><th>方法</th>${th}</tr></thead><tbody>
-    <tr style="${!isL ? 'font-weight:bold;' : ''}"><td style="text-align:center;">合理化公式 (合-無)</td>${d.rowRat.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
+    <tr style="${!isL ? 'font-weight:bold;' : ''}"><td style="text-align:center;">合理化公式（無因次強度）</td>${d.rowRat.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
     <tr style="${isL && d.uhMethod === 'TRI' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">修正三角型單位歷線 (△-${stormTagOf(d.stormTyped).ab})</td>${d.rowTri.map(q => `<td>${f2(q)}</td>`).join('')}</tr>
     <tr style="${isL && d.uhMethod === 'SCS' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">SCS 無因次單位歷線 (S-${stormTagOf(d.stormTyped).ab})</td>${d.rowScs.map(q => `<td>${f2(q)}</td>`).join('')}</tr></tbody></table>`;
   }).join('');
