@@ -4325,6 +4325,60 @@ function stationFreqTablesHTML(list, selectedCode, tableStyle) {
   }).join('');
 }
 // 機率分布選用理由（網頁 ③ 與報告共用）
+// 取所用雨量站資料之最後日期（時資料優先，其次日資料，最後為歷年最大值之最大年份）
+function lastDataInfo(stations) {
+  let best = null, bestYear = 0;
+  (stations || []).forEach(st => {
+    let db = null; try { db = getStationDB(st); } catch (e) { db = null; }
+    if (!db) return;
+    if (db.hourly && db.hourly.t && db.hourly.t.length) {
+      let mx = -Infinity; for (let i = 0; i < db.hourly.t.length; i++) if (db.hourly.t[i] > mx) mx = db.hourly.t[i];
+      const dt = new Date(mx * 3600000);
+      const c = { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1 };
+      if (!best || c.y * 12 + c.m > best.y * 12 + best.m) best = c;
+    }
+    if (db.dailyByDate) {
+      Object.keys(db.dailyByDate).forEach(k => {
+        const m = /^(\d{4})-(\d{2})/.exec(k); if (!m) return;
+        const c = { y: +m[1], m: +m[2] };
+        if (!best || c.y * 12 + c.m > best.y * 12 + best.m) best = c;
+      });
+    }
+    bestYear = Math.max(bestYear, dbLastYear(db));
+  });
+  return best ? { y: best.y, m: best.m } : (bestYear ? { y: bestYear, m: null } : null);
+}
+function dataCutoffText(stations) {
+  const c = lastDataInfo(stations);
+  if (!c) return '';
+  return `資料統計至 ${c.y} 年${c.m ? ' ' + c.m + ' 月' : ''}`;
+}
+// 全部分布未通過卡方檢定時之說明段落（依實際資料產生）
+function noPassFreqParagraph(freq24, sample, years, targetT) {
+  if (!freq24 || freq24.anyPassed) return '';
+  const order = ["LN2", "LN3", "PT3", "LP3", "GUMBEL"].filter(c => freq24.results[c]);
+  const nm = c => ({ LN2: "LN2", LN3: "LN3", PT3: "PT3", LP3: "LP3", GUMBEL: "EV1" }[c] || c);
+  const R = freq24.results, best = freq24.bestCode, n = sample.length;
+  const chi = order.map(c => `${nm(c)}（χ² = ${R[c].chiSq.toFixed(2)} ≥ 臨界值 ${R[c].chiCrit.toFixed(2)}）`).join('、');
+  let skewTxt = '';
+  if (n >= 3) {
+    const m = sample.reduce((a, b) => a + b, 0) / n;
+    const sd = Math.sqrt(sample.reduce((a, b) => a + (b - m) * (b - m), 0) / (n - 1));
+    const g = sd > 0 ? n / ((n - 1) * (n - 2)) * sample.reduce((a, b) => a + Math.pow((b - m) / sd, 3), 0) : 0;
+    const sorted = [...sample].sort((a, b) => a - b);
+    const med = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+    const mx = sorted[n - 1], iy = sample.indexOf(mx);
+    if (g > 0.5) skewTxt = `，主因樣本呈右偏（偏態係數 g = ${g.toFixed(2)}），最大值 ${mx.toFixed(1)} mm${years && years[iy] ? `（${years[iy]} 年）` : ''}為中位數 ${med.toFixed(1)} mm 之 ${(mx / med).toFixed(2)} 倍，極端暴雨拉高上尾而使各分布配適度不佳`;
+    else skewTxt = `（樣本偏態係數 g = ${g.toFixed(2)}，樣本年數 n = ${n}，檢定統計量受分組數少、樣本年數有限影響）`;
+  }
+  const rs = c => R[c].rankW + R[c].rankH;
+  let spread = '';
+  if (targetT && order.every(c => R[c].quantiles[targetT] != null)) {
+    const qs = order.map(c => R[c].quantiles[targetT]), lo = Math.min(...qs), hi = Math.max(...qs);
+    spread = `各分布 ${targetT} 年重現期 24 小時雨量介於 ${lo.toFixed(1)}～${hi.toFixed(1)} mm（相差 ${((hi - lo) / lo * 100).toFixed(1)}%），採用 ${nm(best)} 之 ${R[best].quantiles[targetT].toFixed(1)} mm。`;
+  }
+  return `<p><strong>卡方檢定結果說明：</strong>本次五種機率分布均未通過卡方檢定：${chi}${skewTxt}。依水文分析慣例，於各分布中取標準誤差（SE）序位和（Weibull ＋ Hazen）最小者作為設計基準，故採用 <strong>${nm(best)}</strong>（序位和 ${rs(best)}）。${spread}</p>`;
+}
 function freqSelectionRationale(freq24, selectedCode, ctx = {}) {
   const order = ["LN2", "LN3", "PT3", "LP3", "GUMBEL"].filter(c => freq24.results[c]);
   const nm = c => ({ LN2: "LN2", LN3: "LN3", PT3: "PT3", LP3: "LP3", GUMBEL: "EV1" }[c] || c);
@@ -4902,10 +4956,10 @@ function runFrequencyAndHydrology() {
       <td><strong>一般含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+&alpha;, &alpha;=${(alphaPct*100).toFixed(0)}%)</strong></td>
       ${chosenClearSeries.map(q => `<td><strong>${(q * (1 + alphaPct)).toFixed(2)}</strong></td>`).join('')}
     </tr>
-    <tr style="background:${dfMetrics.isDebris ? '#7f1d1d' : '#1e293b'}; color:${dfMetrics.isDebris ? '#fef08a' : '#94a3b8'};">
-      <td><strong>${dfMetrics.isDebris ? '⚠️ ' : ''}土石流尖峰流量 Q<sub>D</sub> = C<sub>m</sub>/(C<sub>m</sub>−C<sub>d</sub>)·Q<sub>p</sub> (C<sub>d</sub>=${dfMetrics.Cd.toFixed(3)}, C<sub>m</sub>=${dfMetrics.Cm})</strong></td>
+    ${dfMetrics.isDebris ? `<tr style="background:#7f1d1d; color:#fef08a;">
+      <td><strong>⚠️ 土石流尖峰流量 Q<sub>D</sub> = C<sub>m</sub>/(C<sub>m</sub>−C<sub>d</sub>)·Q<sub>p</sub> (C<sub>d</sub>=${dfMetrics.Cd.toFixed(3)}, C<sub>m</sub>=${dfMetrics.Cm})</strong></td>
       ${rowDebris.map(q => `<td><strong>${q.toFixed(2)}</strong></td>`).join('')}
-    </tr>
+    </tr>` : ''}
   `;
 
   document.getElementById('hydroResultSummary').innerHTML =
@@ -5826,7 +5880,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
       <text x="507" y="47" text-anchor="middle" font-size="13" font-weight="bold" fill="#0f172a">洪峰流量演算</text>
       <text x="507" y="67" text-anchor="middle" font-size="11.5" fill="#166534">• 合理化公式 (&lt;1000ha)</text>
       <text x="507" y="85" text-anchor="middle" font-size="11.5" fill="#166534">• 三角型歷線 (≥1000ha)</text>
-      <text x="507" y="103" text-anchor="middle" font-size="11.5" fill="#991b1b">• 含砂水流 / 土石流流量</text>
+      <text x="507" y="103" text-anchor="middle" font-size="11.5" fill="#991b1b">• 含砂水流${df.isDebris ? ' / 土石流' : ''}流量</text>
       <line x1="585" y1="73" x2="615" y2="73" stroke="#1e293b" stroke-width="2" marker-end="url(#arrow)"/>
 
       <ellipse cx="672" cy="73" rx="55" ry="26" fill="#fde047" stroke="#ca8a04" stroke-width="2"/>
@@ -5873,7 +5927,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   </table>
 
   <h3>三、降雨量分析</h3>
-  <p>經統計分析選用雨量站歷年降雨紀錄，計畫區徐昇加權年平均降雨量為 <strong>${d.P_annual.toFixed(1)} mm</strong>，歷年最大 24 小時暴雨量彙整詳附錄表 A-5。年最大 24 小時暴雨量之推求方式：${d.basis ? d.basis.methodNote : ''}</p>
+  <p>經統計分析選用雨量站歷年降雨紀錄，計畫區徐昇加權年平均降雨量為 <strong>${d.P_annual.toFixed(1)} mm</strong>，歷年最大 24 小時暴雨量彙整詳附錄表 A-5${dataCutoffText(activeStations) ? '（' + dataCutoffText(activeStations) + '）' : ''}。年最大 24 小時暴雨量之推求方式：${d.basis ? d.basis.methodNote : ''}</p>
   <div style="margin:8px 0;"><strong>雨量資料整理與離群檢定</strong>${cleanSummaryHTML(d.basis && d.basis.clean, d.screen, true)}</div>
   ${d.basis && d.basis.convInfo ? `<div style="margin:6px 0; font-size:13px;">
     <strong>表 3-3　台灣地區年最大日暴雨量修正係數（一日→24 小時）</strong>
@@ -5901,6 +5955,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     </thead>
     <tbody>${table4Rows}</tbody>
   </table>
+  ${noPassFreqParagraph(d.freq24, (d.basis && d.basis.sample24) || [], (d.basis && d.basis.years) || [], d.targetT)}
   ${d.freqReason ? `<p><strong>機率分布選用理由說明：</strong></p><p style="line-height:1.8;">${d.freqReason}</p>` : ''}
 
   <h3>五、雨型設計（${d.stormTyped.label}）</h3>
@@ -6000,7 +6055,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   ${hydroImgUrl ? `
   <div class="fig-box">
     <img src="${hydroImgUrl}" style="background:#fff; max-width:100%;" alt="設計洪水與單位歷線演算圖" />
-    <div class="fig-caption">圖 4 集水區 ${d.targetT} 年重現期有效雨量與直接逕流（含土石流）洪水歷線圖</div>
+    <div class="fig-caption">圖 4 集水區 ${d.targetT} 年重現期有效雨量與直接逕流${df.isDebris ? '（含土石流）' : ''}洪水歷線圖</div>
   </div>` : ''}
 
   <div class="caption">表 9 不同重現期距之清水洪峰流量分析成果表（單位：cms，括號內為比流量）</div>
@@ -6027,11 +6082,11 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     </tbody>
   </table>
 
-  <h3>七、含砂水流與土石流潛勢溪流流量分析</h3>
+  <h3>七、含砂水流${df.isDebris ? '與土石流潛勢溪流' : ''}流量分析</h3>
   <p>1. <strong>一般含砂水流流量</strong>：考量山區集水區豪雨時易夾帶泥砂，含砂水流洪峰流量以 Q<sub>s</sub> = Q<sub>p</sub>(1 + &alpha;) 估算，採用泥砂混合率 &alpha; = ${(d.alphaPct * 100).toFixed(0)}%。</p>
-  <p>2. <strong>土石流潛勢溪流尖峰流量</strong>：${df.isDebris ? `本溪流屬農業部農村發展及水土保持署公告之土石流潛勢溪流（編號：<strong>${df.dfId}</strong>），` : '若考慮極端暴雨誘發土石流情境，'}依水土保持手冊（土石流篇），溪床坡度 &theta; = ${df.thetaDeg}°、土石內摩擦角 &phi; = ${df.phiDeg}°、動摩擦係數 tan&alpha; = ${df.tanA}、靜止土體最大濃度 C<sub>m</sub> = ${df.Cm}、&gamma;<sub>s</sub> = ${df.gamma_s} t/m³、&gamma;<sub>w</sub> = ${df.gamma_w} t/m³。${df.method === 'T' ? `&theta; 位於 10°～20° 且 Takahashi 公式 C<sub>d</sub> = &gamma;<sub>w</sub>tan&theta; / [(&gamma;<sub>s</sub>−&gamma;<sub>w</sub>)(tan&phi;−tan&theta;)] = ${df.Cd.toFixed(3)} 落於合理範圍 ${df.CD_MIN.toFixed(3)} &le; C<sub>d</sub> &lt; 0.9C<sub>m</sub>（= ${df.CD_MAX.toFixed(3)}），採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。` : `${df.reason}，Takahashi 公式不適用，改採 Lien &amp; Tsai 公式（C<sub>d</sub> = ½[(C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>) ± &radic;((C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>)² − 4&chi;<sub>1</sub>C<sub>m</sub>)]，&xi; = 0.04）${df.CdRaw === null ? '，Lien & Tsai 公式無合理解' : '，推得 ' + df.CdRaw.toFixed(3)}，${df.CdState === 'ok' ? '落於合理範圍' : '超出合理範圍 ' + df.CD_MIN.toFixed(3) + '～' + df.CD_MAX.toFixed(3) + ' 而取邊界值'}，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。`}並依土石流流量公式 Q<sub>D</sub> = C<sub>m</sub> / (C<sub>m</sub> − C<sub>d</sub>) &times; Q<sub>p</sub>（放大倍率 ${df.amp.toFixed(2)}）推算土石流尖峰流量。各重現期含砂水流與土石流流量成果如表 10 及表 11 所示。</p>
+  ${df.isDebris ? `<p>2. <strong>土石流潛勢溪流尖峰流量</strong>：${df.isDebris ? `本溪流屬農業部農村發展及水土保持署公告之土石流潛勢溪流（編號：<strong>${df.dfId}</strong>），` : '若考慮極端暴雨誘發土石流情境，'}依水土保持手冊（土石流篇），溪床坡度 &theta; = ${df.thetaDeg}°、土石內摩擦角 &phi; = ${df.phiDeg}°、動摩擦係數 tan&alpha; = ${df.tanA}、靜止土體最大濃度 C<sub>m</sub> = ${df.Cm}、&gamma;<sub>s</sub> = ${df.gamma_s} t/m³、&gamma;<sub>w</sub> = ${df.gamma_w} t/m³。${df.method === 'T' ? `&theta; 位於 10°～20° 且 Takahashi 公式 C<sub>d</sub> = &gamma;<sub>w</sub>tan&theta; / [(&gamma;<sub>s</sub>−&gamma;<sub>w</sub>)(tan&phi;−tan&theta;)] = ${df.Cd.toFixed(3)} 落於合理範圍 ${df.CD_MIN.toFixed(3)} &le; C<sub>d</sub> &lt; 0.9C<sub>m</sub>（= ${df.CD_MAX.toFixed(3)}），採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。` : `${df.reason}，Takahashi 公式不適用，改採 Lien &amp; Tsai 公式（C<sub>d</sub> = ½[(C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>) ± &radic;((C<sub>m</sub>+&chi;<sub>1</sub>+&chi;<sub>2</sub>)² − 4&chi;<sub>1</sub>C<sub>m</sub>)]，&xi; = 0.04）${df.CdRaw === null ? '，Lien & Tsai 公式無合理解' : '，推得 ' + df.CdRaw.toFixed(3)}，${df.CdState === 'ok' ? '落於合理範圍' : '超出合理範圍 ' + df.CD_MIN.toFixed(3) + '～' + df.CD_MAX.toFixed(3) + ' 而取邊界值'}，採用 C<sub>d</sub> = <strong>${df.Cd.toFixed(3)}</strong>。`}並依土石流流量公式 Q<sub>D</sub> = C<sub>m</sub> / (C<sub>m</sub> − C<sub>d</sub>) &times; Q<sub>p</sub>（放大倍率 ${df.amp.toFixed(2)}）推算土石流尖峰流量。各重現期含砂水流與土石流流量成果如表 10 及表 11 所示。</p>` : '<p>各重現期距含砂水流洪峰流量成果如表 10 及表 11 所示。</p>'}
 
-  <div class="caption">表 10 不同重現期距之含砂水流與土石流尖峰流量一覽表（單位：cms）</div>
+  <div class="caption">表 10 不同重現期距之含砂水流${df.isDebris ? '與土石流' : ''}尖峰流量一覽表（單位：cms）</div>
   <table>
     <thead>
       <tr><th>流量類別 / 重現期</th><th>2年</th><th>5年</th><th>10年</th><th>25年</th><th>50年</th><th>100年</th><th>200年</th></tr>
@@ -6045,17 +6100,19 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
         <td style="text-align:center;">含砂水流 Q<sub>s</sub> (&alpha;=${(d.alphaPct * 100).toFixed(0)}%)</td>
         ${(isLarge ? d.rowUH : d.rowRat).map(q => `<td>${(q * (1 + d.alphaPct)).toFixed(2)}</td>`).join('')}
       </tr>
+      ${df.isDebris ? `
       <tr style="${df.isDebris ? 'background:#fef2f2;font-weight:bold;' : ''}">
         <td style="text-align:center;">土石流流量 Q<sub>d</sub> (C<sub>d</sub>=${df.Cd.toFixed(3)})</td>
         ${d.rowDebris.map(q => `<td>${q.toFixed(2)}</td>`).join('')}
       </tr>
+      ` : ''}
     </tbody>
   </table>
 
   <div class="caption">表 11 集水區計畫設計洪峰流量選用成果表（重現期距 ${d.targetT} 年）</div>
   <table>
     <thead>
-      <tr><th>控制點位置與座標</th><th>水文分析方法</th><th>清水流 Q<sub>${d.targetT}</sub> (cms)</th><th>含砂水流 Q<sub>s</sub> (cms)</th><th>土石流流量 Q<sub>d</sub> (cms)</th><th>工程設計建議採用值 (cms)</th></tr>
+      <tr><th>控制點位置與座標</th><th>水文分析方法</th><th>清水流 Q<sub>${d.targetT}</sub> (cms)</th><th>含砂水流 Q<sub>s</sub> (cms)</th>${df.isDebris ? '<th>土石流流量 Q<sub>d</sub> (cms)</th>' : ''}<th>工程設計建議採用值 (cms)</th></tr>
     </thead>
     <tbody>
       <tr>
@@ -6063,14 +6120,14 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
         <td style="text-align:center;">${isLarge ? d.uhMethodLabel + '法' : '合理化公式法'}</td>
         <td>${d.chosenClearQ.toFixed(2)}</td>
         <td>${d.chosenSedQ.toFixed(2)}</td>
-        <td>${df.Qd.toFixed(2)}</td>
+        ${df.isDebris ? `<td>${df.Qd.toFixed(2)}</td>` : ''}
         <td><strong>${(df.isDebris ? df.Qd : d.chosenSedQ).toFixed(2)} (${df.isDebris ? '土石流設計' : '含砂水流設計'})</strong></td>
       </tr>
     </tbody>
   </table>
   ${appendixHTML}
   <h3>附錄　其他計算明細</h3>
-  <div class="caption">表 A-5 集水區歷年最大 24 小時暴雨量一覽表（單位：mm）</div>
+  <div class="caption">表 A-5 集水區歷年最大 24 小時暴雨量一覽表（單位：mm${dataCutoffText(activeStations) ? '；' + dataCutoffText(activeStations) : ''}）</div>
   <table>
     <thead><tr><th>年份</th><th>24小時最大暴雨量</th><th>年份</th><th>24小時最大暴雨量</th></tr></thead>
     <tbody>${table2Rows}</tbody>
@@ -6099,17 +6156,17 @@ function buildExportCSV(distCode, T, uhResult, qRat, qSed, dfMetrics) {
   let csv = "\uFEFF集水區水文分析計算書\n";
   csv += `控制點TWD97_X,${twd.x},控制點TWD97_Y,${twd.y},控制點緯度,${twd.lat},控制點經度,${twd.lon}\n`;
   csv += `集水面積 A (ha),${currentWatershedParams.A_ha.toFixed(2)},流路長 L (m),${currentWatershedParams.L_m.toFixed(1)},高程差 H (m),${currentWatershedParams.H_m.toFixed(1)},集流時間 Tc (hr),${currentWatershedParams.Tc_hr.toFixed(2)}\n`;
-  csv += `選用分布,${distCode},重現期(年),${T},合理化洪峰(cms),${qRat.toFixed(2)},修正三角形歷線洪峰(cms),${uhResult.Qp.toFixed(2)},含砂水流洪峰(cms),${qSed.toFixed(2)},Cd公式,${dfMetrics.method === 'T' ? 'Takahashi 公式' : 'Lien&Tsai 公式'},tanα,${dfMetrics.tanA},Cm,${dfMetrics.Cm},Cd公式原始值,${dfMetrics.CdRaw === null ? '無合理解' : dfMetrics.CdRaw.toFixed(3)},土石流體積濃度Cd(採用),${dfMetrics.Cd.toFixed(3)},土石流尖峰流量Qd=Cm/(Cm-Cd)*Qp(cms),${dfMetrics.Qd.toFixed(2)}\n\n`;
+  csv += `選用分布,${distCode},重現期(年),${T},合理化洪峰(cms),${qRat.toFixed(2)},修正三角形歷線洪峰(cms),${uhResult.Qp.toFixed(2)},含砂水流洪峰(cms),${qSed.toFixed(2)}${dfMetrics.isDebris ? `,Cd公式,${dfMetrics.method === 'T' ? 'Takahashi 公式' : 'Lien&Tsai 公式'},tanα,${dfMetrics.tanA},Cm,${dfMetrics.Cm},Cd公式原始值,${dfMetrics.CdRaw === null ? '無合理解' : dfMetrics.CdRaw.toFixed(3)},土石流體積濃度Cd(採用),${dfMetrics.Cd.toFixed(3)},土石流尖峰流量Qd=Cm/(Cm-Cd)*Qp(cms),${dfMetrics.Qd.toFixed(2)}` : ''}\n\n`;
   if (lastReportData) {
     const d0 = lastReportData, ci = d0.basis && d0.basis.convInfo;
     csv += `採用單位歷線法,${d0.uhMethodLabel},有效雨量方式,${d0.CN_val ? 'CN=' + d0.CN_val : 'phi=' + d0.phi_val + 'mm/hr'},三角型洪峰(cms),${d0.triRes.Qp.toFixed(2)},SCS洪峰(cms),${d0.scsRes.Qp.toFixed(2)}\n`;
     if (ci) csv += `一日→24hr換算係數,${ci.label}${ci.auto ? '(自動判定)' : '(手動)'},來源,水利署96年水文業務現代化綜合計畫表3-3\n`;
   }
-  csv += "時間(hr),有效雨量Re(mm),清水流流量Q(cms),土石流流量Qd(cms)\n";
+  const csvDf = !!dfMetrics.isDebris;
+  csv += "時間(hr),有效雨量Re(mm),清水流流量Q(cms)" + (csvDf ? ",土石流流量Qd(cms)" : "") + "\n";
   uhResult.timeAxis.forEach((t, i) => {
     const qClear = uhResult.Q[i];
-    const qDebris = qClear * dfMetrics.amp;
-    csv += `${t},${uhResult.Pe_bar[i].toFixed(2)},${qClear.toFixed(2)},${qDebris.toFixed(2)}\n`;
+    csv += `${t},${uhResult.Pe_bar[i].toFixed(2)},${qClear.toFixed(2)}` + (csvDf ? `,${(qClear * dfMetrics.amp).toFixed(2)}` : "") + "\n";
   });
   lastHydroReportCSV = csv;
 }
@@ -6355,7 +6412,7 @@ function cpMergedHTML(pts, web) {
     const info = `<td rowspan="3" style="text-align:center;">${pt.name}</td><td rowspan="3" style="text-align:center;">${pt.type}</td><td rowspan="3">${f1(w.A_ha)}</td><td rowspan="3">${f1(w.L_m)}</td><td rowspan="3">${f1(w.H_m)}</td><td rowspan="3">${f2(w.Tc_hr)}</td><td rowspan="3" style="text-align:center;">${isL ? d.uhMethodLabel : '合理化公式'}</td>`;
     return `<tr>${info}<td style="text-align:center;">清水 Q<sub>p</sub></td>${ser.map(q => `<td><strong>${f2(q)}</strong></td>`).join('')}</tr>` +
       `<tr><td style="text-align:center;">含砂 Q<sub>s</sub></td>${ser.map(q => `<td>${f2(q * (1 + d.alphaPct))}</td>`).join('')}</tr>` +
-      `<tr style="${isDf ? 'background:' + (web ? '#7f1d1d' : '#fef2f2') + ';' : ''}"><td style="text-align:center;">土石流 Q<sub>d</sub></td>${isDf ? d.rowDebris.map(q => `<td>${f2(q)}</td>`).join('') : T.map(() => '<td style="text-align:center;">－</td>').join('')}</tr>`;
+      (isDf ? `<tr style="background:${web ? '#7f1d1d' : '#fef2f2'};"><td style="text-align:center;">土石流 Q<sub>d</sub></td>${d.rowDebris.map(q => `<td>${f2(q)}</td>`).join('')}</tr>` : '');
   }).join('');
   const rainRows = ord.map(pt => {
     const r = pt.d.freq24.results[pt.d.selectedCode];
@@ -6382,8 +6439,9 @@ function renderMergedTables() {
 function buildMultiPointCSV() {
   const pts = cpGroupOrder(cpRows());
   const T = RETURN_PERIODS;
+  const anyDf = pts.some(pt => pt.d.dfMetrics && pt.d.dfMetrics.isDebris);
   let csv = "﻿多控制點洪峰彙整表（各點獨立計算，未做匯流疊加；統一分布、共用雨型）\n";
-  csv += "編號,名稱,類型,TWD97_X,TWD97_Y,A(ha),L(m),H(m),Tc(hr),方法,採用分布," + T.map(t => `P24_${t}yr(mm)`).join(",") + "," + T.map(t => `Q${t}_清水`).join(",") + "," + T.map(t => `Qs${t}_含砂`).join(",") + "," + T.map(t => `Qd${t}_土石流`).join(",") + "\n";
+  csv += "編號,名稱,類型,TWD97_X,TWD97_Y,A(ha),L(m),H(m),Tc(hr),方法,採用分布," + T.map(t => `P24_${t}yr(mm)`).join(",") + "," + T.map(t => `Q${t}_清水`).join(",") + "," + T.map(t => `Qs${t}_含砂`).join(",") + (anyDf ? "," + T.map(t => `Qd${t}_土石流`).join(",") : "") + "\n";
   pts.forEach((pt, i) => {
     const d = pt.d, w = d.watershed, isL = w.A_ha >= 1000, ser = isL ? d.rowUH : d.rowRat;
     const isDf = d.dfMetrics && d.dfMetrics.isDebris;
@@ -6391,7 +6449,7 @@ function buildMultiPointCSV() {
       isL ? d.uhMethodLabel : "合理化公式", d.selectedCode,
       ...T.map(t => d.freq24.results[d.selectedCode].quantiles[t].toFixed(1)),
       ...ser.map(q => q.toFixed(2)), ...ser.map(q => (q * (1 + d.alphaPct)).toFixed(2)),
-      ...(isDf ? d.rowDebris.map(q => q.toFixed(2)) : T.map(() => "-"))].join(",") + "\n";
+      ...(anyDf ? (isDf ? d.rowDebris.map(q => q.toFixed(2)) : T.map(() => "-")) : [])].join(",") + "\n";
   });
   return csv;
 }
