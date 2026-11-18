@@ -84,6 +84,49 @@
     #leftPanel [style*="font-size:15"] { font-size: 18px !important; }
     #bottomDrawer { font-size: 13.5px; }
     .leaflet-control-layers { background: #1e293b !important; color: #f8fafc !important; border: 1px solid #475569 !important; }
+    /* ===== 淺色大字版面（覆蓋上方深色設定） ===== */
+    body { background: #e2e8f0; color: #0f172a; }
+    #leftPanel { width: 680px; background: #f1f5f9; border-right: 1px solid #cbd5e1; padding: 16px; gap: 14px; font-size: 16px; color: #0f172a; }
+    #vSplit { background: #cbd5e1; }
+    .card { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px 18px; }
+    .card h3 { font-size: 19px; color: #0c4a6e; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 12px; }
+    label { font-size: 15px; color: #334155; margin-bottom: 4px; }
+    select, input[type="file"], input[type="number"], input[type="text"] { background: #ffffff; color: #0f172a; border: 1px solid #94a3b8; font-size: 16px; padding: 8px 10px; margin-bottom: 8px; }
+    button { font-size: 16px; padding: 9px 12px; margin-bottom: 8px; color: #fff; }
+    button.secondary { background: #64748b; } button.secondary:hover { background: #475569; }
+    .status { background: #ffffff; color: #0f172a; font-size: 15.5px; border: 1px solid #cbd5e1; border-left: 5px solid #0284c7; }
+    .status.error { background: #fef2f2; color: #991b1b; border-left-color: #dc2626; }
+    .status.warn { background: #fffbeb; color: #92400e; border-left-color: #f59e0b; }
+    .metric { background: #f1f5f9; padding: 8px 10px; border-radius: 8px; }
+    .metric span { font-size: 14px; color: #475569; } .metric strong { font-size: 20px; color: #0f172a; }
+    table { font-size: 15px; } th, td { border: 1px solid #cbd5e1; padding: 7px 8px; } th { background: #e2e8f0; color: #334155; }
+    .upload-slot { background: #f8fafc; border: 1px dashed #94a3b8; }
+    .debris-box { background: #fef2f2; border: 1px solid #f87171; }
+    #tabBar { background: #f1f5f9; border-bottom: 2px solid #cbd5e1; gap: 6px; padding: 10px 0 8px 0; }
+    #tabBar button { background: #ffffff; color: #334155; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 16px; padding: 10px 12px; margin: 0; }
+    #tabBar button:hover { background: #e0f2fe; }
+    #tabBar button.active { background: #e0f2fe; color: #0369a1; border: 2px solid #0284c7; font-weight: bold; }
+    #tabBar .ti { margin-right: 6px; font-size: 18px; }
+    #stepHint { display: none; align-items: center; gap: 10px; background: #e0f2fe; color: #0c4a6e; border-radius: 10px; padding: 10px 14px; font-size: 16px; line-height: 1.5; }
+    #stepHint.on { display: flex; }
+    .stepnav { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; }
+    .stepnav button { width: auto; flex: 1; margin: 0; background: #0284c7; }
+    .stepnav button.prev { background: #64748b; }
+    #leftPanel [style*="#94a3b8"] { color: #475569 !important; }
+    #leftPanel [style*="#cbd5e1"], #leftPanel [style*="#e2e8f0"] { color: #1e293b !important; }
+    #leftPanel [style*="#f8fafc"] { color: #0f172a !important; }
+    #leftPanel [style*="#64748b"] { color: #475569 !important; }
+    #leftPanel [style*="#7dd3fc"], #leftPanel [style*="#38bdf8"] { color: #0369a1 !important; }
+    #leftPanel [style*="#fde68a"], #leftPanel [style*="#fde047"], #leftPanel [style*="#fbbf24"], #leftPanel [style*="#facc15"] { color: #b45309 !important; }
+    #leftPanel [style*="#fca5a5"] { color: #b91c1c !important; }
+    #leftPanel [style*="#d8b4fe"], #leftPanel [style*="#a5b4fc"] { color: #5b21b6 !important; }
+    #leftPanel [style*="background:#0f172a"], #leftPanel [style*="background: #0f172a"], #leftPanel [style*="background:#1e293b"], #leftPanel [style*="background:#0b1220"] { background: #f8fafc !important; }
+    #leftPanel [style*="background:#1e3a8a"] { background: #dbeafe !important; }
+    #leftPanel [style*="background:#7f1d1d"], #leftPanel [style*="background:#450a0a"] { background: #fee2e2 !important; color: #7f1d1d !important; }
+    #leftPanel [style*="background:#451a03"] { background: #fef3c7 !important; }
+    #leftPanel input[style], #leftPanel select[style] { color: #0f172a; }
+    .leaflet-control-layers { background: #ffffff !important; color: #0f172a !important; border: 1px solid #94a3b8 !important; }
+    #bottomDrawer { background: #ffffff; color: #0f172a; font-size: 15px; }
   </style>
 </head>
 <body>
@@ -95,13 +138,14 @@
   </div>
 
   <div id="tabBar">
-    <button data-tab="t1" class="active">① 範圍與雨量站</button>
-    <button data-tab="t2">② 雨量資料</button>
-    <button data-tab="t3">③ 頻率分析</button>
-    <button data-tab="t4">④ 雨型與歷線</button>
-    <button data-tab="t5">⑤ 成果與報告</button>
-    <button data-tab="t6">⑥ 多控制點</button>
+    <button data-tab="t1" class="active"><span class="ti">📍</span>① 範圍與雨量站</button>
+    <button data-tab="t2"><span class="ti">🌧️</span>② 雨量資料</button>
+    <button data-tab="t3"><span class="ti">📊</span>③ 頻率分析</button>
+    <button data-tab="t4"><span class="ti">⛈️</span>④ 雨型與歷線</button>
+    <button data-tab="t5"><span class="ti">📄</span>⑤ 成果與報告</button>
+    <button data-tab="t6"><span class="ti">🗺️</span>⑥ 多控制點</button>
   </div>
+  <div id="stepHint"></div>
 <div class="tabpane active" id="pane_t1">
   <!-- Step 1: DEM 集水區劃定 -->
   <div class="card">
@@ -568,6 +612,10 @@
     <div style="font-size:13.5px; color:#cbd5e1; line-height:1.6; margin-bottom:8px;">
       頻率分析成果表顯示於「③ 頻率分析」，各重現期洪峰流量表與洪水歷線圖顯示於「④ 雨型與歷線」，皆自動計算，參數一改即更新；可拖曳左側面板右緣調整寬度。
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div><label style="font-size:13px;">🏛 縣市（報告封面）</label><input type="text" id="input_county" placeholder="例如：南投縣" style="margin:0;" /></div>
+      <div><label style="font-size:13px;">🌊 溪流名稱</label><input type="text" id="input_stream" placeholder="例如：稍來溪" style="margin:0;" /></div>
+    </div>
     <div class="grid-2">
       <button id="btnRunHydrology" class="success" style="margin-bottom:0;">重新執行水文與土石流演算</button>
       <button id="btnGenerateReport" class="report-btn" style="margin-bottom:0;">📄 產出集水區水文分析報告</button>
@@ -584,27 +632,30 @@
 </div>
 <div class="tabpane" id="pane_t6">
   <div class="card" id="multiPointCard">
-    <h3><span>⑥ 多控制點洪峰（手動點選，僅算各點洪峰）</span><span id="cpCountBadge" class="badge">0 點</span></h3>
-    <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:#fde68a; font-weight:bold;">
+    <h3><span>⑥ 多控制點洪峰</span><span id="cpCountBadge" class="badge">0 點</span></h3>
+    <label style="display:flex; align-items:center; gap:8px; font-size:14px; color:#fde68a; font-weight:bold;">
       <input type="checkbox" id="chkMultiMode" style="width:auto; margin:0;" />
-      啟用多控制點模式（開啟後，在地圖上每點一個主流／支流控制點就新增一點）
+      📍 啟用：在地圖河道上點選，每點新增一個控制點
     </label>
-    <div style="font-size:11px; color:#94a3b8; line-height:1.5; margin:4px 0;">
-      每個控制點各自：DEM 劃設集水區 → 徐昇權重 → 24hr 暴雨頻率分析 → 設計雨量 → 洪峰流量（共用上方 C、α、CN、歷線法等參數）。各點洪峰為獨立結果，<strong>不做歷線匯流演算、也不可直接相加</strong>（支流匯入主流處之匯流需另行以歷線演算）。點列表中的點可切換檢視、修改雨量站勾選，系統會自動更新該點。
+    <div style="font-size:13px; color:#94a3b8; line-height:1.6; margin:6px 0;">
+      <div>① 點河道新增控制點（代號 A、B、C… 依點擊順序）</div>
+      <div>② 可改名稱、類型（主流／支流）</div>
+      <div>③ 產生圖表：示意圖、降雨強度表、洪峰流量表、選用成果表</div>
+      <div style="font-size:12px;color:#64748b;">各點以「該點以上整個上游集水區」獨立計算；採用方法依最下游控制點統一。</div>
     </div>
-    <div id="cpList" style="max-height:200px; overflow:auto; font-size:11.5px;"></div>
-    <div id="cpSharedNote" style="font-size:11px; color:#fde68a; line-height:1.5; margin-top:4px;"></div>
-    <details id="cpMergedBox" open style="margin-top:6px;"><summary style="cursor:pointer; font-size:12px; color:#7dd3fc;">合併成果表（主流＋支流）</summary>
+    <div id="cpList" style="max-height:220px; overflow:auto; font-size:13px;"></div>
+    <div id="cpSharedNote" style="font-size:12px; color:#fde68a; line-height:1.5; margin-top:4px;"></div>
+    <details id="cpMergedBox" open style="margin-top:6px;"><summary style="cursor:pointer; font-size:14px; color:#7dd3fc;">📊 成果表</summary>
       <div id="cpMerged" style="overflow:auto; margin-top:4px;"></div>
-      <button id="btnCpPop" class="secondary" style="width:auto; padding:2px 10px; margin:4px 0 0 0; font-size:11px;">在新視窗放大檢視</button>
+      <button id="btnCpPop" class="secondary" style="width:auto; padding:3px 12px; margin:4px 0 0 0; font-size:12px;">在新視窗放大檢視</button>
     </details>
-    <div class="grid-2" style="margin-top:6px;">
-      <button id="btnCpRecalc" class="secondary" style="margin-bottom:0;">重算全部控制點</button>
-      <button id="btnCpClear" class="secondary" style="margin-bottom:0;">清除全部控制點</button>
+    <div class="grid-2" style="margin-top:8px;">
+      <button id="btnCpReport" class="report-btn" style="margin-bottom:0;">📄 產生成果圖表報告</button>
+      <button id="btnCpCsv" class="secondary" style="margin-bottom:0;">⬇ 下載 CSV</button>
     </div>
     <div class="grid-2" style="margin-top:6px;">
-      <button id="btnCpReport" class="report-btn" style="margin-bottom:0;">📄 多控制點洪峰彙整報告</button>
-      <button id="btnCpCsv" class="secondary" style="margin-bottom:0;">下載彙整 CSV</button>
+      <button id="btnCpRecalc" class="secondary" style="margin-bottom:0;">🔄 重算</button>
+      <button id="btnCpClear" class="secondary" style="margin-bottom:0;">🗑 清除全部</button>
     </div>
   </div>
 </div>
@@ -5152,9 +5203,9 @@ function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics, off) {
       animation: off ? false : undefined,
       devicePixelRatio: off ? 1 : undefined,
       maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: '#cbd5e1', font: { size: 11 } } } },
+      plugins: { legend: { labels: { color: '#334155', font: { size: 13 } } } },
       scales: {
-        x: { title: { display: true, text: '時間 (hr, 0~36hr 完整退水歷線)', color: '#94a3b8' }, ticks: { color: '#94a3b8', maxTicksLimit: 19 } },
+        x: { title: { display: true, text: '時間 (hr, 0~36hr 完整退水歷線)', color: '#334155' }, ticks: { color: '#475569', maxTicksLimit: 19 } },
         y: {
           position: 'left',
           min: 0,
@@ -5187,6 +5238,22 @@ function lat2tileFloat(lat, z) { return (1 - Math.log(Math.tan(lat * Math.PI / 1
 
 // ---- 報告頁「一鍵下載 PDF」：以區塊為單位轉成圖片後排入 A4（避免把圖表從中間切斷）----
 const PDF_LIBS = '<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"><\/script><script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"><\/script>';
+// 報告封面名稱：縣市、溪流名稱（縣市空白時，依採用雨量站中徐昇權重最大者預填）
+function reportNames() {
+  const ce = document.getElementById('input_county'), se = document.getElementById('input_stream');
+  let county = ce ? ce.value.trim() : '';
+  if (!county && ce) {
+    try {
+      const st = (currentThiessenList || []).filter(x => x.checked && x.county).sort((a, b) => (b.weight || 0) - (a.weight || 0))[0];
+      if (st) { county = String(st.county).trim(); ce.value = county; }
+    } catch (e) { /* 略 */ }
+  }
+  const stream = se ? se.value.trim() : '';
+  const prefix = county + stream;
+  const title = prefix + '集水區水文分析報告';
+  const safe = t => t.replace(/[\\/:*?"<>|]/g, '_');
+  return { county, stream, prefix, title, file: safe(title), has: !!prefix };
+}
 async function reportPdfMain(fileName) {
   const btn = document.getElementById('btnPdf');
   const old = btn.textContent;
@@ -5649,6 +5716,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   setStatus("正在合成國土測繪中心等高線地形圖、100% 徐昇多邊形與水文報告圖表...");
   const d = lastReportData;
   const w = d.watershed;
+  const rn = reportNames();
   const twd = w.outletTWD97;
   const activeStations = d.thiessen.filter(s => s.checked);
   const stNamesStr = activeStations.map(s => `${s.name}${s.withdrawn ? '(撤銷站)' : ''}雨量站（站號 ${s.id}，權重 ${(s.weight*100).toFixed(1)}%）`).join("、");
@@ -5824,7 +5892,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <title>集水區水文分析報告</title>
+  <title>${rn.title}</title>
   <style>
     body { font-family: "DFKai-SB", "BiauKai", "PMingLiU", "Microsoft JhengHei", serif; color: #111; max-width: 920px; margin: 20px auto; padding: 20px 40px; line-height: 1.75; }
     h1, h2, h3 { text-align: left; color: #000; }
@@ -5845,11 +5913,12 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 </head>
 <body>
   <div class="toolbar">
-    <span>📄 <strong>集水區水文分析報告（含等高線地形圖與控制點座標）</strong> — 面積 A = ${w.A_ha.toFixed(1)} ha</span>
+    <span>📄 <strong>${rn.title}</strong> — 面積 A = ${w.A_ha.toFixed(1)} ha</span>
     <span><button id="btnPdf" onclick="reportPdfMain(window.__PDFNAME)">⬇ 下載 PDF</button> <button onclick="window.print()" style="background:#475569;">🖨️ 列印</button></span>
   </div>
 
-  <h1>集水區水文分析報告</h1>
+  <h1>${rn.title}</h1>
+  ${rn.has ? `<div style="text-align:center;font-size:16px;margin:-4px 0 14px;">縣市：${rn.county || '—'}　｜　溪流：${rn.stream || '—'}　｜　集水面積 ${w.A_ha.toFixed(1)} ha</div>` : ''}
 
   <h3>一、水文分析原則與流程</h3>
   <p>水文分析演算是集水區治理規劃過程中相關設計參數取得的主要依據。依水土保持技術規範規定，山坡地集水區系統之洪峰流量估算，若有實測資料時，其逕流量得採用單位歷線分析；若無實測資料時，得採用合理化公式計算，惟其較適用於面積一千公頃（1,000 ha）以內者，大於 1,000 ha 時改以修正三角型單位歷線進行洪水量演算並分析成果；其完整分析流程如圖 1 所示。</p>
@@ -6141,7 +6210,7 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   <table><thead><tr>${[0,1,2].map(() => '<th>t/T<sub>p</sub></th><th>q/Q<sub>p</sub></th>').join('')}</tr></thead><tbody>${(() => { const R = SCS_UH_RATIOS, n = Math.ceil(R.length / 3); let o = ''; for (let i = 0; i < n; i++) o += '<tr>' + [0,1,2].map(k => R[i + k * n] ? `<td>${R[i + k * n][0].toFixed(1)}</td><td>${R[i + k * n][1].toFixed(3)}</td>` : '<td></td><td></td>').join('') + '</tr>'; return o; })()}</tbody></table>
 
   ${appendixFreqHTML}
-${pdfBlockHTML(`集水區水文分析報告_${new Date().toISOString().slice(0,10)}.pdf`)}
+${pdfBlockHTML(`${rn.has ? rn.file : '集水區水文分析報告'}_${new Date().toISOString().slice(0,10)}.pdf`)}
 </body>
 </html>
   `;
@@ -6176,7 +6245,7 @@ document.getElementById('btnExportCSV').addEventListener('click', () => {
   const blob = new Blob([lastHydroReportCSV], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `集水區水文分析計算書_${new Date().toISOString().slice(0,10)}.csv`;
+  { const rn = reportNames(); a.download = `${rn.has ? rn.file : '集水區水文分析報告'}_計算書_${new Date().toISOString().slice(0,10)}.csv`; }
   a.click();
 });
 
@@ -6237,9 +6306,11 @@ document.getElementById('geojsonFile').addEventListener('change', async (e) => {
 // ============================================================================
 const CP_COLORS = ["#16a34a", "#2563eb", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#a16207", "#db2777", "#4d7c0f", "#475569"];
 
+function cpCodeOf(n) { let c = '', k = n; while (k > 0) { const r = (k - 1) % 26; c = String.fromCharCode(65 + r) + c; k = Math.floor((k - 1) / 26); } return c; }
+const cpLabel = pt => `${pt.name}${pt.code ? ' ' + pt.code : ''}`;
 function registerControlPoint(geo) {
   cpSeq++;
-  const pt = { id: "cp" + cpSeq, name: `控制點${cpSeq}`, type: controlPoints.length === 0 ? "主流" : "支流", geo, uncheckedIds: [], d: null, color: CP_COLORS[(cpSeq - 1) % CP_COLORS.length] };
+  const pt = { id: "cp" + cpSeq, code: cpCodeOf(cpSeq), name: `控制點${cpSeq}`, type: controlPoints.length === 0 ? "主流" : "支流", geo, uncheckedIds: [], d: null, color: CP_COLORS[(cpSeq - 1) % CP_COLORS.length] };
   controlPoints.push(pt);
   activePointId = pt.id;
   renderControlPointList();
@@ -6280,7 +6351,7 @@ function renderControlPointList() {
     let q = '<span style="color:#fbbf24;">待雨量資料</span>';
     if (d) q = `${d.watershed.A_ha.toFixed(0)} ha｜Q<sub>${d.targetT}</sub>=<strong>${d.chosenClearQ.toFixed(1)}</strong> cms`;
     return `<tr style="${act ? 'background:#1e3a8a;' : ''}">
-      <td style="color:${pt.color};">●</td>
+      <td style="color:${pt.color};font-weight:bold;white-space:nowrap;">● ${pt.code || ''}</td>
       <td><input type="text" class="cp-name" data-id="${pt.id}" value="${pt.name.replace(/"/g, '&quot;')}" style="width:92px;margin:0;padding:2px 4px;font-size:11.5px;"/></td>
       <td><select class="cp-type" data-id="${pt.id}" style="margin:0;padding:2px;font-size:11.5px;"><option ${pt.type === '主流' ? 'selected' : ''}>主流</option><option ${pt.type === '支流' ? 'selected' : ''}>支流</option></select></td>
       <td>${q}</td>
@@ -6406,13 +6477,25 @@ function cpMergedHTML(pts, web) {
   const th = `<th>${T.join('年</th><th>')}年</th>`;
   const ord = cpGroupOrder(pts);
   const d0 = ord[0].d, tT = d0.targetT;
-  const peakRows = ord.map(pt => {
-    const d = pt.d, w = d.watershed, isL = w.A_ha >= 1000, ser = isL ? d.rowUH : d.rowRat;
-    const isDf = d.dfMetrics && d.dfMetrics.isDebris;
-    const info = `<td rowspan="3" style="text-align:center;">${pt.name}</td><td rowspan="3" style="text-align:center;">${pt.type}</td><td rowspan="3">${f1(w.A_ha)}</td><td rowspan="3">${f1(w.L_m)}</td><td rowspan="3">${f1(w.H_m)}</td><td rowspan="3">${f2(w.Tc_hr)}</td><td rowspan="3" style="text-align:center;">${isL ? d.uhMethodLabel : '合理化公式'}</td>`;
-    return `<tr>${info}<td style="text-align:center;">清水 Q<sub>p</sub></td>${ser.map(q => `<td><strong>${f2(q)}</strong></td>`).join('')}</tr>` +
-      `<tr><td style="text-align:center;">含砂 Q<sub>s</sub></td>${ser.map(q => `<td>${f2(q * (1 + d.alphaPct))}</td>`).join('')}</tr>` +
-      (isDf ? `<tr style="background:${web ? '#7f1d1d' : '#fef2f2'};"><td style="text-align:center;">土石流 Q<sub>d</sub></td>${d.rowDebris.map(q => `<td>${f2(q)}</td>`).join('')}</tr>` : '');
+  const bottom = [...pts].sort((x, y) => y.d.watershed.A_ha - x.d.watershed.A_ha)[0];
+  const useUH = bottom.d.watershed.A_ha >= 1000;
+  const mtag = d => ({ rat: d.idfInfo && d.idfInfo.src === 'HORNER' ? '合-H' : '合-無', uh: `${d.uhMethod === 'SCS' ? 'S' : '△'}-${stormTagOf(d.stormTyped).ab}` });
+  const body = pts.map(pt => {
+    const d = pt.d, w = d.watershed;
+    return `<tr><td style="text-align:center;">${cpLabel(pt)}</td><td>${f1(w.A_ha)}</td><td>${f2(w.Tc_hr)}</td>${d.rowIntensities.map(v => `<td>${f2(v)}</td>`).join('')}</tr>`;
+  }).join('');
+  const intRows = body;
+  const flowRows = pts.map(pt => {
+    const d = pt.d, w = d.watershed, tg = mtag(d), sp = q => `${f2(q)}<br>(${f2(q / w.A_km2)})`;
+    const bs = on => on ? 'font-weight:bold;' : '';
+    return `<tr><td rowspan="2" style="text-align:center;">${cpLabel(pt)}</td><td rowspan="2">${f1(w.A_ha)}</td><td rowspan="2">${f2(w.Tc_hr)}</td>` +
+      `<td style="text-align:center;">${tg.rat}</td>${d.rowRat.map(q => `<td style="${bs(!useUH)}">${sp(q)}</td>`).join('')}</tr>` +
+      `<tr><td style="text-align:center;">${tg.uh}</td>${d.rowUH.map(q => `<td style="${bs(useUH)}">${sp(q)}</td>`).join('')}</tr>`;
+  }).join('');
+  const selRows = pts.map(pt => {
+    const d = pt.d, ser = useUH ? d.rowUH : d.rowRat, al = d.alphaPct;
+    return `<tr><td rowspan="2" style="text-align:center;">${cpLabel(pt)}</td><td rowspan="2">${(al * 100).toFixed(0)}%</td><td style="text-align:center;">清水流 Q</td>${ser.map(q => `<td>${f2(q)}</td>`).join('')}</tr>` +
+      `<tr><td style="text-align:center;">含砂水流 Q<sub>s</sub></td>${ser.map(q => `<td>${f2(q * (1 + al))}</td>`).join('')}</tr>`;
   }).join('');
   const rainRows = ord.map(pt => {
     const r = pt.d.freq24.results[pt.d.selectedCode];
@@ -6420,11 +6503,17 @@ function cpMergedHTML(pts, web) {
   }).join('');
   const codes = Object.keys(d0.freq24.results);
   const freqRows = ord.map(pt => `<tr><td style="text-align:center;">${pt.name}</td>${codes.map(c => { const r = pt.d.freq24.results[c]; const sel = c === pt.d.selectedCode; return `<td style="${sel ? 'font-weight:bold;background:' + (web ? '#1e3a8a' : '#fef9c3') + ';' : ''}">${f1(r.quantiles[tT])}<br><span style="font-size:0.85em;">χ²=${r.chiSq.toFixed(2)}${r.pass ? '' : '✗'}／序位和${r.rankW + r.rankH}</span></td>`; }).join('')}</tr>`).join('');
-  return cap('表 1 各控制點洪峰流量合併表（單位：cms；主流在前、支流在後）') +
-    `<table ${tbl}><thead><tr><th>控制點</th><th>類型</th><th>A (ha)</th><th>L (m)</th><th>H (m)</th><th>t<sub>c</sub> (hr)</th><th>方法</th><th>流量類別</th>${th}</tr></thead><tbody>${peakRows}</tbody></table>` +
-    cap('表 2 各控制點設計 24 小時暴雨量（mm；統一分布）') +
+  const tg0 = mtag(bottom.d);
+  return cap('表 1 各控制點降雨強度分析成果表（無因次公式；單位：mm/hr）') +
+    `<table ${tbl}><thead><tr><th>控制點</th><th>A (ha)</th><th>集流時間 t<sub>c</sub> (hr)</th>${th.replace(/年<\/th>/g, '年</th>')}</tr></thead><tbody>${intRows}</tbody></table>` +
+    cap('表 2 各控制點不同重現期距之洪峰流量分析成果表（單位：cms；括號為比流量 cms/km²；粗體為本次採用）') +
+    `<table ${tbl}><thead><tr><th>控制點</th><th>A (ha)</th><th>t<sub>c</sub> (hr)</th><th>分析方法</th>${th}</tr></thead><tbody>${flowRows}</tbody></table>` +
+    `<div style="font-size:${web ? '11px' : '12.5px'};margin:2px 0 8px;">註：合-無／合-H ＝合理化公式配合降雨強度公式；△-／S- ＝單位歷線法配合該雨型。採用規則：以最下游控制點（${cpLabel(bottom)}，A = ${f1(bottom.d.watershed.A_ha)} ha ${useUH ? '≥' : '<'} 1,000 ha）之計算方法（${useUH ? tg0.uh : tg0.rat}）統一採用於全部控制點。</div>` +
+    cap('表 3 各控制點各重現期距洪峰流量選用成果表（單位：cms）') +
+    `<table ${tbl}><thead><tr><th>控制點</th><th>泥砂混合率</th><th>流量類別</th>${th}</tr></thead><tbody>${selRows}</tbody></table>` +
+    cap('表 4 各控制點設計 24 小時暴雨量（mm；統一分布）') +
     `<table ${tbl}><thead><tr><th>控制點</th><th>類型</th><th>樣本年數</th><th>採用分布</th>${th}</tr></thead><tbody>${rainRows}</tbody></table>` +
-    cap(`表 3 各控制點五種分布之 ${tT} 年 24 小時雨量並排（mm；粗體＝採用；✗＝卡方未通過）`) +
+    cap(`表 5 各控制點五種分布之 ${tT} 年 24 小時雨量並排（mm；粗體＝採用；✗＝卡方未通過）`) +
     `<table ${tbl}><thead><tr><th>控制點</th>${codes.map(c => `<th>${CP_DIST_NAME[c] || c}</th>`).join('')}</tr></thead><tbody>${freqRows}</tbody></table>`;
 }
 
@@ -6442,8 +6531,9 @@ function buildMultiPointCSV() {
   const anyDf = pts.some(pt => pt.d.dfMetrics && pt.d.dfMetrics.isDebris);
   let csv = "﻿多控制點洪峰彙整表（各點獨立計算，未做匯流疊加；統一分布、共用雨型）\n";
   csv += "編號,名稱,類型,TWD97_X,TWD97_Y,A(ha),L(m),H(m),Tc(hr),方法,採用分布," + T.map(t => `P24_${t}yr(mm)`).join(",") + "," + T.map(t => `Q${t}_清水`).join(",") + "," + T.map(t => `Qs${t}_含砂`).join(",") + (anyDf ? "," + T.map(t => `Qd${t}_土石流`).join(",") : "") + "\n";
+  const useUH0 = [...pts].sort((x, y) => y.d.watershed.A_ha - x.d.watershed.A_ha)[0].d.watershed.A_ha >= 1000;
   pts.forEach((pt, i) => {
-    const d = pt.d, w = d.watershed, isL = w.A_ha >= 1000, ser = isL ? d.rowUH : d.rowRat;
+    const d = pt.d, w = d.watershed, isL = useUH0, ser = isL ? d.rowUH : d.rowRat;
     const isDf = d.dfMetrics && d.dfMetrics.isDebris;
     csv += [i + 1, pt.name, pt.type, w.outletTWD97.x, w.outletTWD97.y, w.A_ha.toFixed(1), w.L_m.toFixed(1), w.H_m.toFixed(1), w.Tc_hr.toFixed(2),
       isL ? d.uhMethodLabel : "合理化公式", d.selectedCode,
@@ -6451,13 +6541,27 @@ function buildMultiPointCSV() {
       ...ser.map(q => q.toFixed(2)), ...ser.map(q => (q * (1 + d.alphaPct)).toFixed(2)),
       ...(anyDf ? (isDf ? d.rowDebris.map(q => q.toFixed(2)) : T.map(() => "-")) : [])].join(",") + "\n";
   });
+  const bottom = [...pts].sort((x, y) => y.d.watershed.A_ha - x.d.watershed.A_ha)[0], useUH = bottom.d.watershed.A_ha >= 1000;
+  csv += `\n採用規則,以最下游控制點(${bottom.name})方法統一採用,${useUH ? '單位歷線法' : '合理化公式'}\n`;
+  csv += "\n降雨強度成果表(mm/hr)\n代號,控制點,A(ha),Tc(hr)," + T.map(t => `I${t}`).join(",") + "\n";
+  pts.forEach(pt => { const w = pt.d.watershed; csv += [pt.code || '', pt.name, w.A_ha.toFixed(1), w.Tc_hr.toFixed(2), ...pt.d.rowIntensities.map(v => v.toFixed(2))].join(",") + "\n"; });
+  csv += "\n洪峰流量成果表(cms；比流量cms/km2)\n代號,控制點,A(ha),Tc(hr),方法,項目," + T.map(t => `${t}年`).join(",") + "\n";
+  pts.forEach(pt => { const d = pt.d, w = d.watershed;
+    [["合理化公式", d.rowRat], ["單位歷線法", d.rowUH]].forEach(([nm, ser]) => {
+      csv += [pt.code || '', pt.name, w.A_ha.toFixed(1), w.Tc_hr.toFixed(2), nm, "流量", ...ser.map(q => q.toFixed(2))].join(",") + "\n";
+      csv += [pt.code || '', pt.name, w.A_ha.toFixed(1), w.Tc_hr.toFixed(2), nm, "比流量", ...ser.map(q => (q / w.A_km2).toFixed(2))].join(",") + "\n";
+    }); });
+  csv += "\n選用成果表(cms)\n代號,控制點,泥砂混合率,項目," + T.map(t => `${t}年`).join(",") + "\n";
+  pts.forEach(pt => { const d = pt.d, ser = useUH ? d.rowUH : d.rowRat;
+    csv += [pt.code || '', pt.name, (d.alphaPct * 100).toFixed(0) + "%", "清水流", ...ser.map(q => q.toFixed(2))].join(",") + "\n";
+    csv += [pt.code || '', pt.name, (d.alphaPct * 100).toFixed(0) + "%", "含砂水流", ...ser.map(q => (q * (1 + d.alphaPct)).toFixed(2))].join(",") + "\n"; });
   return csv;
 }
 document.getElementById('btnCpCsv').addEventListener('click', () => {
   if (!cpRows().length) { setStatus("尚無已完成演算之控制點。", "warn"); return; }
   const blob = new Blob([buildMultiPointCSV()], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `多控制點洪峰彙整_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+  { const rn = reportNames(); a.download = `${rn.has ? rn.file : '集水區水文分析報告'}_多控制點洪峰彙整_${new Date().toISOString().slice(0, 10)}.csv`; } a.click();
 });
 
 const CP_REPORT_CSS = `
@@ -6469,7 +6573,39 @@ th,td{border:1px solid #000;padding:4px 6px;text-align:right} th{background:#f1f
 .toolbar button{background:#0284c7;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:bold}
 @media print{.toolbar{display:none}body{margin:0;padding:10px}}`;
 
-function multiPointReportHTML(pts, mapImgs) {
+// 控制點示意圖：各控制點上游集水區半透明疊繪（面積大者在下），標示控制點代號與名稱
+function renderControlPointsOverviewImage(pts) {
+  const W = 860, H = 580, cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
+  const g = cvs.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H);
+  const items = pts.filter(pt => pt.d && pt.d.watershed && pt.d.watershed.feature);
+  if (!items.length) return '';
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  items.forEach(pt => turf.coordAll(pt.d.watershed.feature).forEach(([lo, la]) => { x0 = Math.min(x0, lo); x1 = Math.max(x1, lo); y0 = Math.min(y0, la); y1 = Math.max(y1, la); }));
+  const kx = Math.cos((y0 + y1) / 2 * Math.PI / 180), padX = 70, padY = 50;
+  const sc = Math.min((W - 2 * padX) / ((x1 - x0) * kx || 1e-6), (H - 2 * padY) / ((y1 - y0) || 1e-6));
+  const ox = (W - (x1 - x0) * kx * sc) / 2, oy = (H - (y1 - y0) * sc) / 2;
+  const xy = ([lo, la]) => [ox + (lo - x0) * kx * sc, H - oy - (la - y0) * sc];
+  const pal = ['#86efac', '#fde047', '#93c5fd', '#fca5a5', '#c4b5fd', '#fdba74', '#67e8f9', '#f9a8d4'];
+  const ringsOf = f => { const gm = f.geometry || f; return gm.type === 'MultiPolygon' ? gm.coordinates.flat() : gm.coordinates; };
+  [...items].sort((a, b) => b.d.watershed.A_ha - a.d.watershed.A_ha).forEach((pt) => {
+    const col = pal[(items.indexOf(pt)) % pal.length];
+    g.beginPath(); ringsOf(pt.d.watershed.feature).forEach(r => r.forEach((c, i) => { const [x, y] = xy(c); i ? g.lineTo(x, y) : g.moveTo(x, y); g.closePath ? 0 : 0; }));
+    g.fillStyle = col + 'aa'; g.fill('evenodd'); g.strokeStyle = '#334155'; g.lineWidth = 1.2; g.stroke();
+  });
+  g.font = 'bold 16px "Microsoft JhengHei",sans-serif';
+  items.forEach(pt => {
+    const o = pt.d.watershed.outletTWD97; if (!o) return;
+    const [x, y] = xy([o.lon, o.lat]);
+    g.beginPath(); g.arc(x, y, 6, 0, 7); g.fillStyle = '#dc2626'; g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.stroke();
+    const t = pt.code || '';
+    g.lineWidth = 4; g.strokeStyle = '#fff'; g.strokeText(t, x + 9, y - 7); g.fillStyle = '#111'; g.fillText(t, x + 9, y - 7);
+  });
+  g.font = '14px "Microsoft JhengHei",sans-serif';
+  items.forEach((pt, i) => { const yy = 24 + i * 20; g.fillStyle = pal[i % pal.length]; g.fillRect(14, yy - 12, 16, 14); g.strokeStyle = '#334155'; g.lineWidth = 0.8; g.strokeRect(14, yy - 12, 16, 14); g.fillStyle = '#111'; g.fillText(`${pt.code || ''}　${pt.name}（${pt.d.watershed.A_ha.toFixed(0)} ha）`, 36, yy); });
+  return cvs.toDataURL('image/png');
+}
+function multiPointReportHTML(pts, mapImgs, overviewImg) {
+  const rn = reportNames();
   const f1 = v => v.toFixed(1), f2 = v => v.toFixed(2);
   const d0 = pts[0].d, ci = d0.basis && d0.basis.convInfo, T = RETURN_PERIODS;
   const th = `<th>${T.join('年</th><th>')}年</th>`;
@@ -6493,19 +6629,21 @@ function multiPointReportHTML(pts, mapImgs) {
     <tr style="${isL && d.uhMethod === 'SCS' ? 'font-weight:bold;' : ''}"><td style="text-align:center;">SCS 無因次單位歷線 (S-${stormTagOf(d.stormTyped).ab})</td>${d.rowScs.map(q => `<td>${f2(q)}</td>`).join('')}</tr></tbody></table>`;
   }).join('');
   const sharedTxt = cpSharedText(pts);
-  return `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>多控制點洪峰流量彙整報告</title><style>${CP_REPORT_CSS}</style></head><body>
+  return `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${rn.has ? rn.title + '（多控制點）' : '多控制點洪峰流量彙整報告'}</title><style>${CP_REPORT_CSS}</style></head><body>
 <div class="toolbar"><span>📄 <strong>多控制點洪峰流量彙整報告</strong>（${pts.length} 點）</span><span><button id="btnPdf" onclick="reportPdfMain(window.__PDFNAME)">⬇ 下載 PDF</button> <button onclick="window.print()" style="background:#475569;">🖨️ 列印</button></span></div>
-<h1>多控制點洪峰流量彙整報告</h1>
+<h1>${rn.has ? rn.title : '多控制點洪峰流量彙整報告'}</h1>
+${rn.has ? `<div style="text-align:center;font-size:16px;margin:-4px 0 14px;">縣市：${rn.county || '—'}　｜　溪流：${rn.stream || '—'}　｜　多控制點洪峰流量彙整（${pts.length} 點）</div>` : ''}
 <h3>一、分析範圍與方法</h3>
 <p>本報告於主流及支流上手動選定 ${pts.length} 個控制點，各控制點依 DEM 自動回溯劃設集水區，並各自以選用雨量站之徐昇面積權重、CODiS 雨量資料進行最大 24 小時暴雨頻率分析（LN2、LN3、PT3、LP3、EV1 五種分布，卡方檢定與標準誤差評估），推求設計雨量與洪峰流量。為使全流域一致，<strong>各控制點採用同一機率分布，並共用同一雨型</strong>。集水面積小於 1,000 ha 者採合理化公式配合無因次降雨強度，大於或等於 1,000 ha 者採${d0.uhMethodLabel}配合同位序雨型。</p>
 ${sharedTxt ? `<p>${sharedTxt}</p>` : ''}
 <p><strong>注意：各控制點之洪峰流量均為各點集水區獨立計算之結果，未進行歷線匯流演算（支流匯入主流處之歷線疊加、洪峰衰減與時間差未予考慮），故各點洪峰不可直接相加或相減。</strong>如需支流匯入後之主流設計流量，須另以歷線演算。</p>
 <h3>二、共同計算參數</h3>
 <p>合理化公式逕流係數 C = ${d0.C_coef}；${d0.CN_val ? '歷線法有效雨量採手動輸入之 CN = ' + d0.CN_val + '（SCS 逕流公式）' : '歷線法有效雨量採固定損失 φ = ' + d0.phi_val + ' mm/hr（水保手冊固定值法）'}；泥砂混合率 α = ${(d0.alphaPct * 100).toFixed(0)}%；單位歷線法：${d0.uhMethodLabel}；設計重現期距 ${d0.targetT} 年（表列 2～200 年）。${ci ? '日資料之一日→24 小時換算係數：' + ci.label + '（' + (ci.auto ? '依雨量站縣市自動判定' : '手動指定') + '；出處：' + DAYCONV_SOURCE + '），僅用於僅有日資料之站。' : ''}雨量資料來源：中央氣象署 CODiS。含砂水流 Q<sub>s</sub> = Q<sub>p</sub>(1+α)；土石流 Q<sub>D</sub> = C<sub>m</sub>/(C<sub>m</sub>−C<sub>d</sub>)·Q<sub>p</sub>（水保手冊），僅於判定為土石流潛勢溪流之控制點列出。</p>
-<h3>三、控制點成果合併表</h3>
+<h3>三、控制點位置與成果</h3>
+${overviewImg ? `<div style="text-align:center;"><img src="${overviewImg}" style="max-width:100%;border:1px solid #cbd5e1;" /><div class="caption">圖 1 控制點示意圖（各點上游集水區疊繪）</div></div>` : ''}
 ${cpMergedHTML(pts, false)}
 ${detail}
-${pdfBlockHTML(`多控制點洪峰流量彙整報告_${new Date().toISOString().slice(0,10)}.pdf`)}
+${pdfBlockHTML(`${rn.has ? rn.file : '集水區水文分析報告'}_多控制點_${new Date().toISOString().slice(0,10)}.pdf`)}
 </body></html>`;
 }
 
@@ -6515,7 +6653,8 @@ document.getElementById('btnCpReport').addEventListener('click', async () => {
   setStatus(`正在合成 ${pts.length} 個控制點之地形圖與報告...`);
   const imgs = [];
   for (const pt of pts) { try { imgs.push(await renderWatershedMapImageForReport(pt.d)); } catch (e) { imgs.push(""); } }
-  const html = multiPointReportHTML(pts, imgs);
+  let ov = ''; try { ov = renderControlPointsOverviewImage(pts); } catch (e) { ov = ''; }
+  const html = multiPointReportHTML(pts, imgs, ov);
   const win = window.open("", "_blank");
   win.document.write(html); win.document.close();
   setStatus(`✅ 多控制點洪峰彙整報告已開啟於新分頁（${pts.length} 點）。`);
@@ -6539,10 +6678,30 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
 // 版面：分頁標籤、可拖曳之面板寬度與成果區高度
 // ============================================================================
 (function () {
+  const STEP_ORDER = ['t1', 't2', 't3', 't4', 't5', 't6'];
+  const STEP_HINTS = {
+    t1: ['📍', '步驟 1：劃設集水區並選擇雨量站，確認各站徐昇權重。'],
+    t2: ['🌧️', '步驟 2：上傳或確認各雨量站的時資料、日資料與資料年數。'],
+    t3: ['📊', '步驟 3：檢視頻率分析與卡方檢定，確認採用的機率分布。'],
+    t4: ['⛈️', '步驟 4：設定雨型與單位歷線參數，檢視各重現期洪峰流量。'],
+    t5: ['📄', '步驟 5：填寫縣市與溪流名稱，產出報告與計算書。'],
+    t6: ['🗺️', '步驟 6：多控制點洪峰（選用），輸出示意圖與成果表。']
+  };
+  // 每一分頁底部加入「上一步／下一步」
+  STEP_ORDER.forEach((id, i) => {
+    const pane = document.getElementById('pane_' + id); if (!pane) return;
+    const nav = document.createElement('div'); nav.className = 'stepnav';
+    const tl = k => { const b = document.querySelector(`#tabBar button[data-tab="${STEP_ORDER[k]}"]`); return b ? b.textContent.replace(/^[^\s①②③④⑤⑥]*/, '').trim() : ''; };
+    if (i > 0) { const b = document.createElement('button'); b.className = 'prev'; b.textContent = '← 上一步：' + tl(i - 1); b.onclick = () => window.showWsTab(STEP_ORDER[i - 1]); nav.appendChild(b); }
+    if (i < STEP_ORDER.length - 1) { const b = document.createElement('button'); b.textContent = '下一步：' + tl(i + 1) + ' →'; b.onclick = () => window.showWsTab(STEP_ORDER[i + 1]); nav.appendChild(b); }
+    pane.appendChild(nav);
+  });
   const showTab = (id) => {
     document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === 'pane_' + id));
     document.querySelectorAll('#tabBar button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     const lp = document.getElementById('leftPanel'); if (lp) lp.scrollTop = 0;
+    const hint = document.getElementById('stepHint'), hs = STEP_HINTS[id];
+    if (hint) { hint.classList.toggle('on', !!hs); hint.innerHTML = hs ? `<span style="font-size:22px;">${hs[0]}</span><span>${hs[1]}</span>` : ''; }
     try { localStorage.setItem('wsTab', id); } catch (e) { }
     if (id === 't3' || id === 't4' || id === 't5') { try { runFrequencyAndHydrology(); } catch (e) { } }
     if (id === 't4') { try { if (chartInstance) chartInstance.resize(); } catch (e) { } }
@@ -6550,6 +6709,7 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
   window.showWsTab = showTab;
   document.getElementById('tabBar').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) showTab(b.dataset.tab); });
   try { const t = localStorage.getItem('wsTab'); if (t && document.getElementById('pane_' + t)) showTab(t); } catch (e) { }
+  { const hh = document.getElementById('stepHint'); if (hh && !hh.innerHTML) showTab('t1'); }
 
   const lp = document.getElementById('leftPanel'), vs = document.getElementById('vSplit'), rp = document.getElementById('rightPanel');
   const fixMap = () => { try { map.invalidateSize(); } catch (e) { } };
