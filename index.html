@@ -109,6 +109,14 @@
     #tabBar .ti { margin-right: 6px; font-size: 18px; }
     #stepHint { display: none; align-items: center; gap: 10px; background: #e0f2fe; color: #0c4a6e; border-radius: 10px; padding: 10px 14px; font-size: 16px; line-height: 1.5; }
     #stepHint.on { display: flex; }
+    #tabBar button.done::after { content: " ✔"; color: #16a34a; font-weight: bold; }
+    #tabBar button.warn::after { content: " ⚠"; color: #d97706; }
+    #metricRow { display: none; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+    #metricRow.on { display: grid; }
+    .mcard { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; }
+    .mcard span { display: block; font-size: 14px; color: #475569; }
+    .mcard strong { display: block; font-size: 22px; color: #0f172a; margin-top: 2px; }
+    .mcard.ok { border-color: #86efac; background: #f0fdf4; } .mcard.bad { border-color: #fcd34d; background: #fffbeb; }
     .stepnav { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; }
     .stepnav button { width: auto; flex: 1; margin: 0; background: #0284c7; }
     .stepnav button.prev { background: #64748b; }
@@ -146,6 +154,7 @@
     <button data-tab="t5"><span class="ti">📄</span>⑥ 成果與報告</button>
   </div>
   <div id="stepHint"></div>
+  <div id="metricRow"></div>
 <div class="tabpane active" id="pane_t1">
   <!-- Step 1: DEM 集水區劃定 -->
   <div class="card">
@@ -2637,6 +2646,39 @@ function applyStationMerge(oldId, newId) {
 document.getElementById('btnMergeAdd').addEventListener('click', () => applyStationMerge(document.getElementById('mergeOld').value, document.getElementById('mergeNew').value));
 document.getElementById('mergeBox').addEventListener('toggle', refreshMergePanel);
 
+// 撤站合併顯示：各站資料年數、合併說明與舊站列
+function dbYearSet(db) {
+  const ys = new Set();
+  if (!db) return ys;
+  Object.keys(db.ams24ByYear || {}).forEach(y => ys.add(String(y)));
+  if (db.dailyByDate) Object.keys(db.dailyByDate).forEach(k => { const y = String(k).slice(0, 4); if (/^\d{4}$/.test(y)) ys.add(y); });
+  if (db.hourly && db.hourly.t) { let a = null, b = null; for (let i = 0; i < db.hourly.t.length; i++) { const t = db.hourly.t[i]; if (a === null || t < a) a = t; if (b === null || t > b) b = t; } if (a !== null) { for (let y = new Date(a * 3600000).getUTCFullYear(); y <= new Date(b * 3600000).getUTCFullYear(); y++) ys.add(String(y)); } }
+  return ys;
+}
+function mergeNoteHTML(st) {
+  const mg = mergeOf(st.id); if (!mg) return '';
+  const nw = dbYearSet(rawStationDB(st)), md = dbYearSet(getStationDB(st));
+  const olds = mg.oldIds.map(id => ({ id, st: stationById(id), ys: dbYearSet(stationRainDB[id]) }));
+  const oldTotal = olds.reduce((a, o) => a + o.ys.size, 0);
+  const missing = olds.filter(o => o.ys.size === 0);
+  let h = `<div style="font-size:13px;color:#0369a1;margin-top:2px;">🔗 合併後有效年最大值 <strong>${md.size}</strong> 年（舊站 ${oldTotal} 年＋新站 ${nw.size} 年${md.size < oldTotal + nw.size ? '；重疊年以新站為準' : ''}）</div>`;
+  if (missing.length) h += `<div style="font-size:13px;color:#b91c1c;margin-top:2px;">⚠️ 舊站 ${missing.map(o => (o.st ? o.st.name : o.id)).join('、')} 尚未上傳雨量資料，合併後僅有新站資料，請於下方灰色列上傳。</div>`;
+  return h;
+}
+function mergedOldRowsHTML() {
+  let h = '';
+  currentThiessenList.forEach(st => {
+    const mg = mergeOf(st.id); if (!mg) return;
+    mg.oldIds.forEach(oid => {
+      const o = stationById(oid); const db = stationRainDB[oid];
+      const nm = o ? o.name : oid;
+      const dTxt = db && db.hasDaily ? db.dailyLabel : '未上傳', hTxt = db && db.hasHourly ? db.hourlyLabel : (db && db.hourlyEvLabel ? db.hourlyEvLabel : '未上傳');
+      const up = (lab, bg) => `<label style="display:inline-block;padding:3px 8px;background:${bg};color:#fff;border-radius:5px;cursor:pointer;font-size:13px;margin:0;">📂 ${lab}<input type="file" accept=".xlsx,.xls,.csv" class="single-upload" data-stname="${nm}" data-stid="${oid}" style="display:none;" /></label>`;
+      h += `<tr class="merged-old" style="background:#f1f5f9;color:#64748b;"><td style="text-align:center;">—</td><td><strong>${nm}</strong><div style="font-size:13px;color:#64748b;">已併入 ${st.name}</div></td><td>${o ? o.elev : ''}</td><td>—</td><td><strong>0.0%</strong></td><td style="text-align:center;"><div style="font-size:13px;">${dTxt}</div>${up('傳日雨量', '#0284c7')}</td><td style="text-align:center;"><div style="font-size:13px;">${hTxt}</div>${up('傳時雨量', '#0d9488')}</td></tr>`;
+    });
+  });
+  return h;
+}
 function refreshThiessenUI() {
   refreshMergePanel();
   const tbody = document.getElementById('thiessenBody');
@@ -2653,7 +2695,7 @@ function refreshThiessenUI() {
     if (needUpload) tr.style.background = "#450a0a";
     tr.innerHTML = `
       <td style="text-align:center;"><input type="checkbox" class="chk-st" data-idx="${idx}" ${st.checked ? 'checked' : ''} style="width:auto;margin:0;"/></td>
-      <td><strong>${st.name}</strong>${(() => { const r = stationRecommend(st); return `<div style="font-size:10px;color:${r.ok === true ? '#4ade80' : r.ok === false ? '#f87171' : '#fbbf24'};">${r.text}${st._expanded ? `（擴大搜尋，距集水區 ${st._distKm.toFixed(1)} km）` : ''}</div>`; })()}${isWraStation(st) ? ` <span style="color:#d8b4fe;font-size:10.5px;">[${st.org === '台灣電力公司' ? '台電' : '水利署'}]</span>` : ''}${st.withdrawn ? ' <span style="color:#f59e0b;font-size:10.5px;">(撤銷站)</span>' : ''} <span style="color:#94a3b8;font-size:10px;">(${st.id})</span>${st.groupSize > 1 ? '<div style="color:#94a3b8;font-size:10px;">同位置遷站/汰換站，與同座標站平分此徐昇區</div>' : ''}${needUpload ? `<div style="color:#fca5a5;font-size:10.5px;">⚠ 需先上傳此站雨量 Excel（${isWraStation(st) ? '水利署年報轉出檔' : 'CODiS'}），或取消勾選</div>` : ''}</td>
+      <td><strong>${st.name}</strong>${mergeNoteHTML(st)}${(() => { const r = stationRecommend(st); return `<div style="font-size:10px;color:${r.ok === true ? '#4ade80' : r.ok === false ? '#f87171' : '#fbbf24'};">${r.text}${st._expanded ? `（擴大搜尋，距集水區 ${st._distKm.toFixed(1)} km）` : ''}</div>`; })()}${isWraStation(st) ? ` <span style="color:#d8b4fe;font-size:10.5px;">[${st.org === '台灣電力公司' ? '台電' : '水利署'}]</span>` : ''}${st.withdrawn ? ' <span style="color:#f59e0b;font-size:10.5px;">(撤銷站)</span>' : ''} <span style="color:#94a3b8;font-size:10px;">(${st.id})</span>${st.groupSize > 1 ? '<div style="color:#94a3b8;font-size:10px;">同位置遷站/汰換站，與同座標站平分此徐昇區</div>' : ''}${needUpload ? `<div style="color:#fca5a5;font-size:10.5px;">⚠ 需先上傳此站雨量 Excel（${isWraStation(st) ? '水利署年報轉出檔' : 'CODiS'}），或取消勾選</div>` : ''}</td>
       <td>${st.elev}</td>
       <td>${st.checked ? st.areaHa.toFixed(1) : '0.0 (未採用)'}</td>
       <td><strong>${st.checked ? (st.weight * 100).toFixed(1) + '%' : '0.0%'}</strong></td>
@@ -2706,6 +2748,26 @@ function refreshThiessenUI() {
 
     tbody.appendChild(tr);
   });
+
+  // 已併入之舊站：灰色保留顯示（權重 0，可上傳資料）
+  { const oldHtml = mergedOldRowsHTML(); if (oldHtml) {
+    const tmp = document.createElement('tbody'); tmp.innerHTML = oldHtml;
+    Array.from(tmp.children).forEach(tr => {
+      tr.querySelectorAll('.single-upload').forEach(inputEl => {
+        inputEl.addEventListener('change', async (ev) => {
+          const file = ev.target.files[0]; if (!file) return;
+          const targetName = ev.target.dataset.stname, targetId = ev.target.dataset.stid;
+          setStatus(`正在為舊站【<strong>${targetName}</strong>】讀取並解析 <strong>${file.name}</strong>...`);
+          try {
+            const r = await addRainFile(file, { forcedStId: targetId, forcedStName: targetName });
+            afterRainDataChange();
+            setStatus(`✅ 舊站【<strong>${targetName}</strong>】${r.text}` + (r.warn ? `<br>⚠️ ${r.warn}` : ''), r.warn ? 'warn' : 'normal');
+          } catch (err) { setStatus(`解析 ${file.name} 錯誤：${err.message}`, "error"); }
+        });
+      });
+      tbody.appendChild(tr);
+    });
+  } }
 
   // 加上選用站面積與權重 100% 合計列
   const activeSumHa = currentThiessenList.filter(s => s.checked).reduce((a, b) => a + b.areaHa, 0);
@@ -6685,6 +6747,35 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
     t6: ['🗺️', '步驟 5：多控制點洪峰（選用），輸出示意圖與成果表。'],
     t5: ['📄', '步驟 6：填寫縣市與溪流名稱，產出完整報告（多控制點成果列於最後一章）與計算書。']
   };
+  // 步驟完成打勾與結果指標小卡（依目前分析狀態定期更新）
+  const num = (v, n) => (v == null || isNaN(v)) ? '—' : Number(v).toFixed(n);
+  const card = (k, v, cls) => `<div class="mcard ${cls || ''}"><span>${k}</span><strong>${v}</strong></div>`;
+  const curTab = () => { const b = document.querySelector('#tabBar button.active'); return b ? b.dataset.tab : 't1'; };
+  function metricsFor(tab) {
+    const d = (typeof lastReportData !== 'undefined') ? lastReportData : null, w = (typeof currentWatershedParams !== 'undefined') ? currentWatershedParams : null;
+    const used = (typeof currentThiessenList !== 'undefined' ? currentThiessenList : []).filter(x => x.checked);
+    if (tab === 't1') return w ? card('集水面積 A', num(w.A_ha, 1) + ' ha') + card('流路長 L', num(w.L_m, 0) + ' m') + card('高程差 H', num(w.H_m, 0) + ' m') + card('集流時間 Tc', num(w.Tc_hr, 2) + ' hr') + card('採用雨量站', used.length + ' 站') : '';
+    if (!d) return '';
+    const sel = d.freq24 && d.freq24.results[d.selectedCode];
+    if (tab === 't2') { let cut = ''; try { cut = dataCutoffText(used); } catch (e) { } return card('採用雨量站', used.length + ' 站') + card('有效年數', (d.sample24 ? d.sample24.length : 0) + ' 年') + card('資料統計至', cut ? cut.replace('資料統計至 ', '') : '—'); }
+    if (tab === 't3' && sel) return card('採用分布', d.selectedCode) + card('卡方檢定', sel.pass ? '通過' : '未通過', sel.pass ? 'ok' : 'bad') + card(d.targetT + ' 年 P24', num(sel.quantiles[d.targetT], 1) + ' mm') + card('樣本年數', d.sample24.length + ' 年');
+    if (tab === 't4') return card('計算方法', d.watershed.A_ha >= 1000 ? d.uhMethodLabel : '合理化') + card('清水流 Q' + d.targetT, num(d.chosenClearQ, 1) + ' cms') + card('含砂水流 Qs', num(d.chosenSedQ, 1) + ' cms') + card('集流時間 Tc', num(d.watershed.Tc_hr, 2) + ' hr');
+    if (tab === 't6') { const pts = (typeof cpRows === 'function') ? cpRows() : []; if (!pts.length) return ''; const bt = [...pts].sort((a, b) => b.d.watershed.A_ha - a.d.watershed.A_ha)[0]; return card('控制點數', pts.length + ' 點') + card('最下游 A', num(bt.d.watershed.A_ha, 0) + ' ha') + card('採用方法', bt.d.watershed.A_ha >= 1000 ? '單位歷線' : '合理化'); }
+    if (tab === 't5') { const n = (typeof reportNames === 'function') ? reportNames() : { has: false }; return card('縣市', n.county || '未填', n.county ? 'ok' : 'bad') + card('溪流名稱', n.stream || '未填', n.stream ? 'ok' : 'bad') + card('設計重現期', d.targetT + ' 年'); }
+    return '';
+  }
+  function updateStepStatus() {
+    try {
+      const d = lastReportData, hasW = !!currentWatershedParams && currentThiessenList.length > 0;
+      const used = currentThiessenList.filter(x => x.checked), miss = used.some(x => !stationHasData(x));
+      const st = { t1: hasW ? 'done' : '', t2: hasW ? (miss ? 'warn' : (d ? 'done' : '')) : '', t3: d ? 'done' : '', t4: d ? 'done' : '', t6: (typeof cpRows === 'function' && cpRows().length >= 2) ? 'done' : '', t5: (d && reportNames().has) ? 'done' : '' };
+      document.querySelectorAll('#tabBar button').forEach(b => { b.classList.toggle('done', st[b.dataset.tab] === 'done'); b.classList.toggle('warn', st[b.dataset.tab] === 'warn'); });
+      const mr = document.getElementById('metricRow'), html = metricsFor(curTab());
+      if (mr && mr.dataset.h !== html) { mr.dataset.h = html; mr.innerHTML = html; mr.classList.toggle('on', !!html); }
+    } catch (e) { }
+  }
+  setInterval(updateStepStatus, 1200);
+  setTimeout(updateStepStatus, 300);
   // 每一分頁底部加入「上一步／下一步」
   STEP_ORDER.forEach((id, i) => {
     const pane = document.getElementById('pane_' + id); if (!pane) return;
@@ -6701,6 +6792,7 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
     const hint = document.getElementById('stepHint'), hs = STEP_HINTS[id];
     if (hint) { hint.classList.toggle('on', !!hs); hint.innerHTML = hs ? `<span style="font-size:22px;">${hs[0]}</span><span>${hs[1]}</span>` : ''; }
     try { localStorage.setItem('wsTab', id); } catch (e) { }
+    setTimeout(updateStepStatus, 0);
     if (id === 't3' || id === 't4' || id === 't5') { try { runFrequencyAndHydrology(); } catch (e) { } }
     if (id === 't4') { try { if (chartInstance) chartInstance.resize(); } catch (e) { } }
   };
