@@ -1481,6 +1481,7 @@ function rawStationDB(st) { return st && st.id && stationRainDB[st.id] ? station
 // ============================================================================
 // 雨量站合併：撤站後新設之站，可將舊站＋新站的逐日／逐時資料接成一條長序列（以新站為主站）
 // ============================================================================
+let rainDataVersion = 0;   // 每次上傳雨量檔遞增，用於快取流域序列（須先於雨量站資料存取函式宣告，避免載入時 TDZ 錯誤）
 let stationMerges = [];   // [{ newId, oldIds:[...] }]
 try { stationMerges = JSON.parse(localStorage.getItem('stationMerges') || '[]') || []; } catch (e) { stationMerges = []; }
 function saveStationMerges() { try { localStorage.setItem('stationMerges', JSON.stringify(stationMerges)); } catch (e) { } }
@@ -2710,7 +2711,6 @@ function hourLabelFromEpoch(h) {
   const dt = new Date(h * 3600000), pad = n => String(n).padStart(2, "0");
   return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())} ${pad(dt.getUTCHours())}:00`;
 }
-let rainDataVersion = 0;   // 每次上傳雨量檔遞增，用於快取流域序列
 
 function parseAndMergeCodisExcel(wb, forcedStId = null, forcedStName = null, fileName = "", opt = {}) {
   let stMeta = { id: forcedStId || "", name: forcedStName || "", lon: null, lat: null, elev: 0, county: "" };
