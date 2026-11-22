@@ -4360,7 +4360,7 @@ function buildBasinRainBasis(useList) {
     if (part.length && nAll > 0) {
       const txt = '【序列組成說明】' + part.map(m => `${m.name}${m.withdrawn ? '(撤銷站)' : ''}（徐昇權重 ${(m.weight * 100).toFixed(1)}%）僅有 ${m.n} 年資料${m.n <= 6 ? '（' + m.years.join('、') + '）' : '（' + m.years[0] + '～' + m.years[m.years.length - 1] + '）'}`).join('；') +
         `；該站僅於有資料之年份依徐昇權重混入流域序列，其餘年份由其餘有資料之站權重重新正規化（合計 100%）。故各年度之站別組成並不一致，請注意序列均質性。`;
-      res.mixNote = txt; res.methodNote += txt;
+      res.mixNote = txt;
     }
   } catch (e) { }
   basinRainCache = { key, val: res };
@@ -4643,7 +4643,7 @@ let currentCumNote = "";
 function renderRainBasisPanel(basis, selected) {
   const el = document.getElementById('rainBasisPanel');
   if (!el) return;
-  const note = `<div style="color:#94a3b8;margin-bottom:4px;"><strong style="color:#7dd3fc;">年最大 24hr 樣本：</strong>${basis.methodNote}（${basis.years.length} 年）</div>`;
+  const note = `<div style="color:#94a3b8;margin-bottom:4px;"><strong style="color:#7dd3fc;">年最大 24hr 樣本：</strong>${basis.methodNote}${basis.mixNote ? '<br>' + basis.mixNote : ''}（${basis.years.length} 年）</div>`;
   if (!basis.hourly || basis.hourly.candidates.length === 0) {
     el.innerHTML = note + `<div style="color:#fbbf24;">雨型：採用站皆無時資料暴雨事件，使用內建預設同位序雨型。上傳含「時資料」工作表之 CODiS Excel 後，可在此勾選暴雨場次。</div>`;
     return;
@@ -5436,9 +5436,10 @@ async function reportPdfMain(fileName) {
       btn.textContent = '產生中 ' + (i + 1) + '/' + els.length + '…';
       const c = await html2canvas(els[i], { scale: SC, backgroundColor: '#ffffff', useCORS: true, logging: false });
       const itm = { el: els[i], c, w: Math.min(CW, c.width / SC * mm), h: c.height / SC * mm, bps: [], headH: 0 };
-      if (els[i].tagName === 'TABLE') {
-        const r0 = els[i].getBoundingClientRect(), th = els[i].querySelector('thead');
-        itm.bps = Array.from(els[i].querySelectorAll('tr')).map(tr => (tr.getBoundingClientRect().bottom - r0.top) * mm);
+      const tbl = els[i].tagName === 'TABLE' ? els[i] : (els[i].querySelectorAll('table').length === 1 ? els[i].querySelector('table') : null);
+      if (tbl) {
+        const r0 = els[i].getBoundingClientRect(), th = tbl.querySelector('thead');
+        itm.bps = Array.from(tbl.querySelectorAll('tr')).map(tr => (tr.getBoundingClientRect().bottom - r0.top) * mm);
         if (th) itm.headH = (th.getBoundingClientRect().bottom - r0.top) * mm;
       }
       items.push(itm);
@@ -5449,7 +5450,12 @@ async function reportPdfMain(fileName) {
     items.forEach((it, i) => {
       const tag = it.el.tagName, isHead = /^H[1-3]$/.test(tag) || it.el.classList.contains('caption');
       const nxt = items[i + 1];
-      const need = it.h + GAP + (isHead && nxt ? (nxt.h <= CH - it.h - GAP ? nxt.h : Math.min(nxt.h, 45)) : 0);
+      let need = it.h + GAP;
+      if (isHead) {
+        let k = i + 1;
+        while (items[k] && (/^H[1-3]$/.test(items[k].el.tagName) || items[k].el.classList.contains('caption'))) { need += items[k].h + GAP; k++; }
+        if (items[k]) need += (need + items[k].h <= CH ? items[k].h : Math.min(items[k].h, 45));
+      }
       if (!first && y > M && y + need > BOT) newPage();
       first = false;
       if (it.h <= CH) {
@@ -6511,7 +6517,7 @@ function cpCodeOf(n) { let c = '', k = n; while (k > 0) { const r = (k - 1) % 26
 const cpLabel = pt => `${pt.name}${pt.code ? ' ' + pt.code : ''}`;
 function registerControlPoint(geo) {
   cpSeq++;
-  const pt = { id: "cp" + cpSeq, code: cpCodeOf(cpSeq), name: `控制點${cpSeq}`, type: controlPoints.length === 0 ? "主流" : "支流", geo, uncheckedIds: [], d: null, color: CP_COLORS[(cpSeq - 1) % CP_COLORS.length] };
+  const pt = { id: "cp" + cpSeq, code: cpCodeOf(controlPoints.length + 1), name: `控制點${controlPoints.length + 1}`, type: controlPoints.length === 0 ? "主流" : "支流", geo, uncheckedIds: [], d: null, color: CP_COLORS[(cpSeq - 1) % CP_COLORS.length] };
   controlPoints.push(pt);
   activePointId = pt.id;
   renderControlPointList();
@@ -6593,6 +6599,7 @@ document.addEventListener('click', e => {
   if (t.classList.contains('cp-view')) restoreControlPoint(t.dataset.id);
   else if (t.classList.contains('cp-del')) {
     controlPoints = controlPoints.filter(x => x.id !== t.dataset.id);
+    controlPoints.forEach((x, i) => { x.code = cpCodeOf(i + 1); if (/^控制點\d+$/.test(x.name)) x.name = `控制點${i + 1}`; });
     if (activePointId === t.dataset.id) activePointId = null;
     renderControlPointList();
     clearTimeout(sharedTimer); sharedTimer = setTimeout(applyMultiShared, 50);
@@ -6806,12 +6813,20 @@ function renderControlPointsOverviewImage(pts) {
     g.fillStyle = col + 'aa'; g.fill('evenodd'); g.strokeStyle = '#334155'; g.lineWidth = 1.2; g.stroke();
   });
   g.font = 'bold 16px "Microsoft JhengHei",sans-serif';
-  items.forEach(pt => {
-    const o = pt.d.watershed.outletTWD97; if (!o) return;
-    const [x, y] = xy([o.lon, o.lat]);
-    g.beginPath(); g.arc(x, y, 6, 0, 7); g.fillStyle = '#dc2626'; g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.stroke();
-    const t = pt.code || '';
-    g.lineWidth = 4; g.strokeStyle = '#fff'; g.strokeText(t, x + 9, y - 7); g.fillStyle = '#111'; g.fillText(t, x + 9, y - 7);
+  const placed = [], dots = [];
+  items.forEach(pt => { const o = pt.d.watershed.outletTWD97; if (o) { const [x, y] = xy([o.lon, o.lat]); dots.push({ pt, x, y }); } });
+  dots.forEach(({ x, y }) => { g.beginPath(); g.arc(x, y, 6, 0, 7); g.fillStyle = '#dc2626'; g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.stroke(); });
+  dots.forEach(({ pt, x, y }) => {
+    const t = pt.code || '', tw = g.measureText(t).width + 4, th = 18;
+    const cands = [[9, -7], [-9 - tw, -7], [9, 18], [-9 - tw, 18], [-tw / 2, -12], [-tw / 2, 26]];
+    let pick = cands[0];
+    for (const c of cands) {
+      const bx = x + c[0], by = y + c[1] - th + 3;
+      const hit = placed.some(b => bx < b.x + b.w && bx + tw > b.x && by < b.y + b.h && by + th > b.y) || dots.some(d => d.x > bx - 6 && d.x < bx + tw + 6 && d.y > by - 6 && d.y < by + th + 6);
+      if (!hit) { pick = c; break; }
+    }
+    placed.push({ x: x + pick[0], y: y + pick[1] - th + 3, w: tw, h: th });
+    g.lineWidth = 4; g.strokeStyle = '#fff'; g.strokeText(t, x + pick[0], y + pick[1]); g.fillStyle = '#111'; g.fillText(t, x + pick[0], y + pick[1]);
   });
   g.font = '14px "Microsoft JhengHei",sans-serif';
   items.forEach((pt, i) => { const yy = 24 + i * 20; g.fillStyle = pal[i % pal.length]; g.fillRect(14, yy - 12, 16, 14); g.strokeStyle = '#334155'; g.lineWidth = 0.8; g.strokeRect(14, yy - 12, 16, 14); g.fillStyle = '#111'; g.fillText(`${pt.code || ''}　${pt.name}（${pt.d.watershed.A_ha.toFixed(1)} ha）`, 36, yy); });
