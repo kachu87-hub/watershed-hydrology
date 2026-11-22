@@ -23,8 +23,12 @@
     #leftPanel { width: 640px; min-width: 380px; max-width: 85vw; flex: none; height: 100vh; overflow-y: auto; padding: 14px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; gap: 10px; }
     #rightPanel { flex: 1; display: flex; flex-direction: column; height: 100vh; }
     #map { flex: 1; min-height: 100%; background: #090d16; cursor: crosshair; }
-    .coord-readout { background: rgba(15,23,42,.88); color: #e2e8f0; padding: 4px 9px; border: 1px solid #475569; border-radius: 6px; font: 12.5px/1.5 Consolas, "Microsoft JhengHei", monospace; pointer-events: none; white-space: nowrap; }
+    .leaflet-bottom.leaflet-left .leaflet-control-scale { margin-bottom: 4px; }
+    .coord-readout { max-width: 62vw; white-space: normal; background: rgba(15,23,42,.88); color: #e2e8f0; padding: 4px 9px; border: 1px solid #475569; border-radius: 6px; font: 12.5px/1.5 Consolas, "Microsoft JhengHei", monospace; pointer-events: none; white-space: nowrap; }
     .coord-readout b { color: #7dd3fc; }
+    .map-legend { background: rgba(255,255,255,.92); color: #0f172a; padding: 6px 10px; border: 1px solid #94a3b8; border-radius: 6px; font: 12.5px/1.7 "Microsoft JhengHei", sans-serif; }
+    .map-legend summary { cursor: pointer; font-weight: bold; }
+    select { text-overflow: ellipsis; }
     .grid-label { color: #b91c1c; background: rgba(255,255,255,.78); font: bold 11px Consolas, monospace; padding: 0 3px; border-radius: 3px; white-space: nowrap; pointer-events: none; }
     .coord-pin { position: relative; width: 34px; height: 34px; }
     .coord-pin::before, .coord-pin::after { content: ""; position: absolute; background: #ef4444; box-shadow: 0 0 0 1px #fff; }
@@ -108,6 +112,7 @@
     #tabBar button.active { background: #e0f2fe; color: #0369a1; border: 2px solid #0284c7; font-weight: bold; }
     #tabBar .ti { margin-right: 6px; font-size: 18px; }
     #stepHint { display: none; align-items: center; gap: 10px; background: #e0f2fe; color: #0c4a6e; border-radius: 10px; padding: 10px 14px; font-size: 16px; line-height: 1.5; }
+    .qtip { display:inline-block; width:18px; height:18px; line-height:18px; text-align:center; border-radius:50%; background:#0284c7; color:#fff; font-size:13px; cursor:help; margin-left:4px; }
     #stepHint.on { display: flex; }
     #tabBar button.done::after { content: " ✔"; color: #16a34a; font-weight: bold; }
     #tabBar button.warn::after { content: " ⚠"; color: #d97706; }
@@ -170,8 +175,9 @@
         </select>
       </div>
       <div>
-        <label>河道網顯示門檻 (累積格數)</label>
-        <input type="number" id="streamThreshold" value="100" min="10" step="20" />
+        <label>河道起點／河道網面積門檻 (ha) <span class="qtip" title="河道網與主河道起點，取上游集水面積達此門檻處。門檻越小，河道越往山頂延伸、L 越長、Tc 越大；一般約 1,000 ha 之集水區建議 10 ha（約全區 1%）。">?</span></label>
+        <input type="number" id="streamThreshold" value="10" min="1" step="1" />
+        <div id="thHint" style="font-size:13px;color:#475569;margin:-4px 0 6px;"></div>
       </div>
     </div>
     <label style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#38bdf8; margin:2px 0 6px 0;">
@@ -179,6 +185,11 @@
       集水區觸碰邊界框時，自動向山區上游擴張 DEM 範圍並重新完整追溯
     </label>
     <button id="btnLoadDEM">1. 依目前地圖中心載入 DEM 並顯示藍色河道網</button>
+    <details style="margin:2px 0 6px;">
+      <summary style="cursor:pointer;font-weight:bold;">📂 改用自備 DEM（.asc 或 GeoTIFF，選用）</summary>
+      <div style="font-size:12.5px;line-height:1.6;margin:4px 0;">建議先在 QGIS 裁切成集水區附近約 25×25 km（20 m 解析度約 6 MB）再上傳；座標系支援 TWD97（EPSG:3826／3827）與 WGS84／TWD97 經緯度。未上傳時預設使用內建 AWS Terrarium DEM。GeoTIFF 讀取程式於需要時才從網路載入，不增加網頁本身大小。</div>
+      <input type="file" id="customDemFile" accept=".asc,.txt,.tif,.tiff" />
+    </details>
     <div style="font-size:11.5px; color:#cbd5e1; margin:2px 0 6px;">
       <label style="display:inline-flex; align-items:center; gap:6px; margin:0;">
         <input type="checkbox" id="chkSnapStream" style="width:auto; margin:0;" /> 吸附至最近河道，半徑
@@ -209,7 +220,7 @@
 
   <!-- Step 2 & 3: CODiS 測站徐昇權重與「日資料 + 時資料」雙軌上傳 -->
   <div class="card">
-    <h3><span>① 雨量站徐昇權重 (選用站自動重切100%) & 資料上傳</span><span class="badge">動態重切徐昇圖</span></h3>
+    <h3><span>① 雨量站徐昇權重 (選用站自動重切100%)</span><span class="badge">動態重切徐昇圖</span></h3>
     <label style="display:flex; align-items:center; gap:6px; margin:0 0 6px 0; color:#d8b4fe;">
       <input type="checkbox" id="chkWraStations" checked style="width:auto; margin:0;" /> 顯示並列入水利署雨量站（紫色點，219 站，含台電站；114 年水文年報站籍）
     </label>
@@ -612,6 +623,7 @@
       </div>
       <div style="height:340px; position:relative; background:#1e293b; border-radius:6px; padding:6px;">
         <canvas id="hydroChart"></canvas>
+        <div id="hydroPlaceholder" style="position:absolute;inset:6px;display:flex;align-items:center;justify-content:center;text-align:center;border:2px dashed #94a3b8;border-radius:6px;color:#64748b;font-size:14px;line-height:1.7;background:rgba(241,245,249,.92);">尚無歷線資料<br>請依序完成 ① 劃定集水區 → ② 上傳雨量 → ③ 頻率分析</div>
       </div>
   </div>
 </div>
@@ -644,7 +656,7 @@
     <h3><span>⑤ 多控制點洪峰</span><span id="cpCountBadge" class="badge">0 點</span></h3>
     <label style="display:flex; align-items:center; gap:8px; font-size:14px; color:#fde68a; font-weight:bold;">
       <input type="checkbox" id="chkMultiMode" style="width:auto; margin:0;" />
-      📍 啟用：在地圖河道上點選，每點新增一個控制點
+      📍 啟用多控制點模式：在地圖河道上點選，每點新增一個控制點
     </label>
     <div style="font-size:13px; color:#94a3b8; line-height:1.6; margin:6px 0;">
       <div>① 點河道新增控制點（代號 A、B、C… 依點擊順序）</div>
@@ -1443,6 +1455,7 @@ const layerThiessen = L.layerGroup().addTo(map);
 const layerStations = L.layerGroup().addTo(map);
 const layerDebrisStreams = L.layerGroup().addTo(map);
 const layerControlPoints = L.layerGroup().addTo(map);
+const layerRivers = L.layerGroup();        // 水利署河川水系線（參考，選用）
 const layerGrid = L.layerGroup();          // TWD97 公里格網（隨縮放重繪）
 const layerCoordMarker = L.layerGroup().addTo(map);  // 輸入座標後的位置標記
 
@@ -1464,11 +1477,26 @@ L.control.layers(baseLayers, {
   "徐昇多邊形控制區": layerThiessen,
   "雨量站點位": layerStations,
   "農村水保署土石流潛勢溪流": layerDebrisStreams,
+  "河川水系線（水利署資料，依等級著色，供對照）": layerRivers,
   "TWD97 座標格網": layerGrid
 }).addTo(map);
+// 河川線資料（data/rivers.json）於首次開啟圖層時才載入
+let riversLoaded = false;
+layerRivers.on('add', async () => {
+  if (riversLoaded) return; riversLoaded = true;
+  try {
+    const res = await fetch('data/rivers.json'); if (!res.ok) throw new Error('HTTP ' + res.status);
+    const js = await res.json(), rend = L.canvas({ padding: 0.5 });
+    const col = ['#94a3b8', '#38bdf8', '#0ea5e9', '#0284c7', '#1d4ed8', '#4338ca', '#6d28d9', '#7e22ce'];
+    js.f.forEach(([cls, ni, lines]) => {
+      const nm = js.names[ni] || '其他河川';
+      lines.forEach(ln => L.polyline(ln.map(p => [p[1], p[0]]), { renderer: rend, color: col[cls] || '#0284c7', weight: 1 + Math.min(cls, 6) * 0.5, opacity: 0.85 }).bindTooltip(`${nm}（河川等級 ${cls}）`, { sticky: true }).addTo(layerRivers));
+    });
+  } catch (e) { riversLoaded = false; setStatus('⚠️ 無法載入河川線資料（data/rivers.json）：' + e.message + '。本機直接開啟 HTML 時請改用網頁版（GitHub Pages）。', 'warn'); }
+});
 
 // ---- 比例尺 ----
-L.control.scale({ imperial: false, metric: true, position: 'bottomright' }).addTo(map);
+L.control.scale({ imperial: false, metric: true, position: 'bottomleft' }).addTo(map);
 
 // ---- 滑鼠位置座標讀數（TWD97 + 經緯度） ----
 const coordReadout = L.control({ position: 'bottomleft' });
@@ -1845,6 +1873,10 @@ async function loadDEMByCenterAndRange(centerLat, centerLng, rangeKm) {
     rawDem[i] = (rgba[i * 4] * 256 + rgba[i * 4 + 1] + rgba[i * 4 + 2] / 256) - 32768;
   }
 
+  return await buildDemFromRaw(rawDem, width, height, zoom, txMin, tyMin, rangeKm, '');
+}
+async function buildDemFromRaw(rawDem, width, height, zoom, txMin, tyMin, rangeKm, srcLabel) {
+  const n = width * height;
   setStatus(`正在執行 Priority-Flood 窪地填平與 D8 流向累積...`);
   await new Promise(r => setTimeout(r, 20));
 
@@ -1899,15 +1931,16 @@ async function loadDEMByCenterAndRange(centerLat, centerLng, rangeKm) {
     }
   }
 
-  const west = tile2lon(txMin, zoom), east = tile2lon(txMax + 1, zoom);
-  const north = tile2lat(tyMin, zoom), south = tile2lat(tyMax + 1, zoom);
+  const west = tile2lon(txMin, zoom), east = tile2lon(txMin + width / 256, zoom);
+  const north = tile2lat(tyMin, zoom), south = tile2lat(tyMin + height / 256, zoom);
   const midLat = ((north + south) / 2) * Math.PI / 180;
   const dxMeters = ((east - west) / width) * 111320 * Math.cos(midLat);
   const dyMeters = ((north - south) / height) * 110574;
 
   demState = { zoom, rangeKm, txMin, tyMin, width, height, west, east, north, south, dxMeters, dyMeters, rawDem, flowDir, flowAcc };
+  try { updateThHint(); } catch (e) { }
   drawStreamNetwork();
-  setStatus(`✅ DEM 水文網格載入完成 (解析度約 ${dxMeters.toFixed(1)}m)。請直接在地圖藍色河道上點擊控制點！`);
+  setStatus(`✅ DEM 水文網格載入完成${srcLabel ? '（' + srcLabel + '）' : ''} (解析度約 ${dxMeters.toFixed(1)}m)。請直接在地圖藍色河道上點擊控制點！`);
   return true;
 }
 
@@ -1920,7 +1953,7 @@ document.getElementById('btnLoadDEM').addEventListener('click', () => {
 function drawStreamNetwork() {
   if (!demState) return;
   layerStream.clearLayers();
-  const th = parseInt(document.getElementById('streamThreshold').value) || 100;
+  const th = streamThCells();
   const { width, height, flowAcc, south, west, north, east } = demState;
   const cvs = document.createElement('canvas'); cvs.width = width; cvs.height = height;
   const ctx = cvs.getContext('2d'), img = ctx.createImageData(width, height);
@@ -1933,7 +1966,20 @@ function drawStreamNetwork() {
   L.imageOverlay(cvs.toDataURL(), [[south, west], [north, east]], { interactive: false }).addTo(layerStream);
   L.rectangle([[south, west], [north, east]], { color: "#0284c7", weight: 2, fill: false, dashArray: "6,6", interactive: false }).addTo(layerStream);
 }
-document.getElementById('streamThreshold').addEventListener('change', drawStreamNetwork);
+// 面積門檻(ha) → 累積格數：依目前 DEM 實際格寬換算（Z13 約 19 m、Z12 約 38 m）
+function streamCellHa() { return (typeof demState !== 'undefined' && demState && demState.dxMeters) ? demState.dxMeters * demState.dyMeters / 10000 : 0.036; }
+function streamThCells() {
+  const ha = parseFloat(document.getElementById('streamThreshold').value);
+  return Math.max(5, Math.round((ha > 0 ? ha : 10) / streamCellHa()));
+}
+function updateThHint() {
+  const el = document.getElementById('thHint'); if (!el) return;
+  const hasDem = typeof demState !== 'undefined' && demState && demState.dxMeters;
+  el.textContent = `目前約 ${streamThCells()} 格（每格約 ${streamCellHa().toFixed(3)} ha${hasDem ? '' : '，依 Z13 預估；載入 DEM 後依實際格寬換算'}）。門檻過小會使河道畫到山頂、L 過長。`;
+}
+document.getElementById('streamThreshold').addEventListener('input', updateThHint);
+document.getElementById('streamThreshold').addEventListener('change', () => { updateThHint(); drawStreamNetwork(); });
+updateThHint();
 
 function cellToLatLon(r, c) {
   return [tile2lat(demState.tyMin + (r + 0.5) / 256, demState.zoom), tile2lon(demState.txMin + (c + 0.5) / 256, demState.zoom)];
@@ -2051,7 +2097,7 @@ async function delineateAtLatLon(clickLat, clickLng, allowAutoExpand = true) {
 
   // 控制點位置：預設「不吸附」，直接以點擊（或輸入座標）所在 DEM 格為出水口；
   // 勾選「吸附至最近河道」時才找半徑內最近之河道格（再於最近距離 + 1.5 格內取累積量最大者）。
-  const snapTh = parseInt(document.getElementById('streamThreshold').value) || 100;
+  const snapTh = streamThCells();
   const doSnap = !!document.getElementById('chkSnapStream')?.checked;
   const nearestStreamD2 = (radM) => {
     const R = Math.max(1, Math.round(radM / dxMeters));
@@ -2126,7 +2172,7 @@ async function delineateAtLatLon(clickLat, clickLng, allowAutoExpand = true) {
     }
   }
 
-  if (touchedBoundary && allowAutoExpand && document.getElementById('chkAutoExpand').checked) {
+  if (touchedBoundary && allowAutoExpand && !(demState && demState.custom) && document.getElementById('chkAutoExpand').checked) {
     const centroidLat = sumLat / q.length, centroidLon = sumLon / q.length;
     const curRange = demState.rangeKm || parseFloat(document.getElementById('searchRange').value);
     const expandedRange = curRange < 25 ? 25 : (curRange < 40 ? 40 : 60);
@@ -2249,6 +2295,38 @@ function calcTWD97AreaKm2(feat) {
   return sumM2 / 1e6;
 }
 
+// 主河道起點可拖動：拖至河道上任一點，L 改以該點至出口之河道線長度量測、H 改以 DEM 高程差重算
+function demElevAtLatLon(lat, lon) {
+  if (!demState) return null;
+  const n = Math.pow(2, demState.zoom), tx = (lon + 180) / 360 * n;
+  const lr = lat * Math.PI / 180, ty = (1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * n;
+  const c = Math.floor((tx - demState.txMin) * 256), r = Math.floor((ty - demState.tyMin) * 256);
+  if (r < 0 || c < 0 || r >= demState.height || c >= demState.width) return null;
+  return demState.rawDem[r * demState.width + c];
+}
+let headMarker = null;
+function addDraggableHead(coords) {
+  if (headMarker) { try { layerWatershed.removeLayer(headMarker); } catch (e) { } }
+  headMarker = L.marker(coords[0], { draggable: true, zIndexOffset: 800, icon: L.divIcon({ className: '', html: '<div style="width:18px;height:18px;border-radius:50%;background:#f59e0b;border:3px solid #fff;box-shadow:0 0 0 2px #b45309;cursor:grab;"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) });
+  headMarker.bindTooltip('主河道起點（可沿河道拖動，重算 L、H、Tc）', { direction: 'top' });
+  headMarker.on('dragend', () => {
+    const cc = currentWatershedParams && currentWatershedParams.channelCoords; if (!cc) return;
+    const ll = headMarker.getLatLng(); let bi = 0, bd = Infinity;
+    cc.forEach((p, i) => { const d = (p[0] - ll.lat) ** 2 + (p[1] - ll.lng) ** 2; if (d < bd) { bd = d; bi = i; } });
+    let Lm = 0; for (let i = bi; i < cc.length - 1; i++) Lm += map.distance(cc[i], cc[i + 1]);
+    const eh = demElevAtLatLon(cc[bi][0], cc[bi][1]), eo = demElevAtLatLon(cc[cc.length - 1][0], cc[cc.length - 1][1]);
+    if (eh == null || eo == null) { setStatus('⚠️ 起點高程不在目前 DEM 範圍內，無法重算。', 'warn'); headMarker.setLatLng(cc[0]); return; }
+    const Hm = Math.max(5, eh - eo); Lm = Math.max(Lm, 30);
+    currentWatershedParams.L_m = Lm; currentWatershedParams.H_m = Hm;
+    headMarker.setLatLng(cc[bi]);
+    document.getElementById('ui_L_m').textContent = `${Lm.toFixed(1)} m`; document.getElementById('ui_H_m').textContent = `${Hm.toFixed(1)} m`;
+    if (activePointId) { const cp = controlPoints.find(x => x.id === activePointId); if (cp && cp.geo) { cp.geo.L_m = Lm; cp.geo.H_m = Hm; } }
+    setStatus(`✅ 已調整河道起點：L = <strong>${Lm.toFixed(1)} m</strong>，H = <strong>${Hm.toFixed(1)} m</strong>（起點至出口之 DEM 高程差），重新計算中…`);
+    runFrequencyAndHydrology();
+  });
+  headMarker.addTo(layerWatershed);
+}
+
 function applyWatershedGeometry({ feature, L_m, H_m, channelCoords, outletLatLon, clickLatLon, snapDistM, gridAreaKm2, truncated, extraWarning }) {
   layerWatershed.clearLayers();
   layerThiessen.clearLayers();
@@ -2322,7 +2400,10 @@ function applyWatershedGeometry({ feature, L_m, H_m, channelCoords, outletLatLon
   }
 
   L.geoJSON(feature, { style: { color: "#16a34a", weight: 3, fillColor: "#22c55e", fillOpacity: 0.14, interactive: false } }).addTo(layerWatershed);
-  if (channelCoords) L.polyline(channelCoords, { color: "#0284c7", weight: 3.5, interactive: false }).addTo(layerWatershed);
+  if (channelCoords) {
+    L.polyline(channelCoords, { color: "#0284c7", weight: 3.5, interactive: false }).addTo(layerWatershed);
+    if (channelCoords.length > 2 && !restoringPoint) addDraggableHead(channelCoords);
+  }
   L.circleMarker([outLat, outLon], { radius: 7, fillColor: "#ef4444", color: "#fff", weight: 2, fillOpacity: 1 })
     .bindTooltip(`📍 控制點 (出水口)<br>TWD97: X=${outletTWD97.x}, Y=${outletTWD97.y}<br>集水面積: ${areaHa.toFixed(1)} ha`).addTo(layerWatershed);
 
@@ -2423,6 +2504,7 @@ function buildThiessenForWatershed(watershedFeature, totalAreaKm2) {
 
 // 清除前一個控制點遺留的水文演算結果 (表格、圖、報告資料)
 function clearHydrologyOutputs(msg) {
+  { const _ph = document.getElementById('hydroPlaceholder'); if (_ph) _ph.style.display = 'flex'; try { if (chartInstance) { chartInstance.destroy(); chartInstance = null; } } catch (e) { } }
   const note = msg || "尚無有效的雨量分析結果";
   document.getElementById('freqTableBody').innerHTML = `<tr><td colspan="7" style="text-align:center;">${note}</td></tr>`;
   { const fr = document.getElementById('freqReasonBox'); if (fr) fr.innerHTML = ''; }
@@ -4833,7 +4915,7 @@ function runFrequencyAndHydrology() {
     clearHydrologyOutputs("請先上傳勾選雨量站之雨量 Excel（或取消勾選無資料的站）");
     setStatus(
       `⛔ 控制點集水區已劃定，但下列採用雨量站尚無雨量資料：${names}。<br>` +
-      `請於「步驟 2 & 3」上傳各站日資料／時資料 Excel (可批次上傳)，或取消勾選該站 (系統將以其餘勾選站重切徐昇面積至 100%)。`,
+      `請至「② 雨量資料」分頁最上方上傳各站日資料／時資料 Excel (可批次上傳)，或取消勾選該站 (系統將以其餘勾選站重切徐昇面積至 100%)。`,
       "error"
     );
     return;
@@ -5213,7 +5295,7 @@ function drawHydroReportImage(uhResult, targetT, dfMetrics) {
 function renderNonOverlappingHydroChart(uhResult, targetT, dfMetrics, off) {
   let offCvs = null, ctx;
   if (off) { offCvs = document.createElement('canvas'); offCvs.width = 920; offCvs.height = 420; ctx = offCvs.getContext('2d'); }
-  else { ctx = document.getElementById('hydroChart').getContext('2d'); if (chartInstance) chartInstance.destroy(); }
+  else { ctx = document.getElementById('hydroChart').getContext('2d'); if (chartInstance) chartInstance.destroy(); const _ph = document.getElementById('hydroPlaceholder'); if (_ph) _ph.style.display = 'none'; }
 
   const debrisQSeries = uhResult.Q.map(q => +(q * dfMetrics.amp).toFixed(2));
   const highestFlow = dfMetrics.isDebris ? Math.max(...debrisQSeries, 10) : Math.max(...uhResult.Q, 10);
@@ -5774,6 +5856,14 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
   if (!lastReportData) {
     setStatus("請先在地圖上點擊河道控制點完成集水區水文分析，再產出報告！", "warn");
     return;
+  }
+  {
+    const miss = [];
+    if (typeof hasMissingActiveStations === 'function' && hasMissingActiveStations()) miss.push('仍有勾選之雨量站未上傳雨量資料');
+    const cty = (document.getElementById('input_county') || {}).value, stm = (document.getElementById('input_stream') || {}).value;
+    if (!cty || !cty.trim()) miss.push('縣市名稱未填（封面與檔名將留白）');
+    if (!stm || !stm.trim()) miss.push('溪流名稱未填（封面與檔名將留白）');
+    if (miss.length && !confirm('產出報告前檢核發現下列項目：\n\n・' + miss.join('\n・') + '\n\n按「確定」仍要產出，按「取消」回去補齊。')) { setStatus('已取消產出：請先補齊 ' + miss.join('、') + '。', 'warn'); return; }
   }
   setStatus("正在合成國土測繪中心等高線地形圖、100% 徐昇多邊形與水文報告圖表...");
   // 多控制點：完整報告以最下游控制點（全流域）之分析為主體
@@ -6416,7 +6506,7 @@ function renderControlPointList() {
   if (badge) badge.textContent = `${controlPoints.length} 點`;
   drawControlPointsLayer();
   renderMergedTables();
-  if (controlPoints.length === 0) { el.innerHTML = '<div style="color:#94a3b8;">尚無控制點。勾選「啟用多控制點模式」後，於地圖河道上點選。</div>'; return; }
+  if (controlPoints.length === 0) { el.innerHTML = '<div style="color:#94a3b8;">尚無控制點。請先勾選本頁最上方的「啟用多控制點模式」，再於地圖河道上點選。</div>'; return; }
   const rows = controlPoints.map((pt, i) => {
     const d = pt.d, act = pt.id === activePointId;
     let q = '<span style="color:#fbbf24;">待雨量資料</span>';
@@ -6587,7 +6677,9 @@ function cpMergedHTML(pts, web, pre = '') {
     return `<tr><td style="text-align:center;">${cpLabel(pt)}（全流域）</td><td>${pt.d.sample24.length}</td><td style="text-align:center;">${CP_DIST_NAME[pt.d.selectedCode] || pt.d.selectedCode}</td>${T.map(t => `<td>${f1(r.quantiles[t])}</td>`).join('')}</tr>`;
   }).join('');
   const tg0 = mtag(bottom.d);
-  return cap(`表 ${pre}1 各控制點降雨強度分析成果表（無因次公式；單位：mm/hr）`) +
+  const _ar = pts.map(p => p.d.watershed.A_ha), _mn = Math.min(..._ar), _mx = Math.max(..._ar);
+  const straddle = (_mn < 1000 && _mx >= 1000) ? (web ? `<div style="font-size:11.5px;color:#fde68a;margin:4px 0;">` : `<div class="note">`) + `※ 適用性說明：各控制點集水面積介於 ${_mn.toFixed(1)}～${_mx.toFixed(1)} ha，跨越 1,000 ha 分界；依水土保持手冊，面積未達 1,000 ha 者採合理化公式，達 1,000 ha 以上者採單位歷線法，本表兩法並列，採用值（粗體）統一依最下游控制點（全流域）之方法判定，供各點比較參考。</div>` : '';
+  return straddle + cap(`表 ${pre}1 各控制點降雨強度分析成果表（無因次公式；單位：mm/hr）`) +
     `<table ${tbl}><thead><tr><th>控制點</th><th>A (ha)</th><th>集流時間 t<sub>c</sub> (hr)</th>${th.replace(/年<\/th>/g, '年</th>')}</tr></thead><tbody>${intRows}</tbody></table>` +
     cap(`表 ${pre}2 各控制點不同重現期距之洪峰流量分析成果表（單位：cms；括號為比流量 cms/km²；粗體為本次採用）`) +
     `<table ${tbl}><thead><tr><th>控制點</th><th>A (ha)</th><th>t<sub>c</sub> (hr)</th><th>分析方法</th>${th}</tr></thead><tbody>${flowRows}</tbody></table>` +
@@ -6814,6 +6906,153 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
     if (mode) { mode = null; fixMap(); }
   });
   document.getElementById('btnExportCSV2').addEventListener('click', () => document.getElementById('btnExportCSV').click());
+})();
+
+// ================= 第 3~12 項增補 =================
+(function () {
+  // 3. 雨量資料上傳移到 ② 雨量資料分頁最上方
+  try {
+    const slot = document.getElementById('batchCodisUpload').closest('.upload-slot');
+    const pane = document.getElementById('pane_t2');
+    if (slot && pane) {
+      const card = document.createElement('div'); card.className = 'card'; card.id = 'rainUploadCard';
+      card.innerHTML = '<h3><span>② 雨量資料上傳（請先於 ① 劃定集水區與勾選雨量站）</span></h3>';
+      card.appendChild(slot);
+      pane.insertBefore(card, pane.firstChild);
+    }
+  } catch (e) { console.warn(e); }
+
+  // 6. CN 與固定損失 φ 互斥
+  const cn = document.getElementById('input_CN'), phi = document.getElementById('input_phi');
+  if (cn && phi) {
+    const note = document.createElement('div'); note.id = 'phiNote'; note.style.cssText = 'font-size:12px;color:#b45309;margin-top:2px;display:none;';
+    note.textContent = '目前優先採用 CN 法，此欄不參與計算';
+    phi.parentNode.appendChild(note);
+    const sync = () => { const on = cn.value.trim() !== ''; phi.disabled = on; phi.style.opacity = on ? .45 : 1; phi.style.background = on ? '#e2e8f0' : ''; note.style.display = on ? 'block' : 'none'; };
+    cn.addEventListener('input', sync); cn.addEventListener('change', sync); sync();
+  }
+
+  // 9. 地圖圖例（可收合）
+  const lg = L.control({ position: 'bottomright' });
+  lg.onAdd = () => {
+    const d = L.DomUtil.create('div', 'map-legend'); L.DomEvent.disableClickPropagation(d);
+    const dot = (c, b) => `<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${c};border:2px solid ${b || '#fff'};vertical-align:middle;margin-right:5px;"></span>`;
+    d.innerHTML = `<details open><summary>圖例</summary>
+      <div>${dot('#22c55e')}已有雨量資料</div>
+      <div>${dot('#f59e0b')}氣象署站（未上傳資料）</div>
+      <div>${dot('#a855f7', '#1e1b4b')}水利署／台電站（未上傳）</div>
+      <div>${dot('#94a3b8')}撤銷站</div>
+      <div>${dot('#dc2626', '#fef08a')}土石流潛勢溪流</div>
+      <div><span style="display:inline-block;width:18px;height:3px;background:#0ea5e9;vertical-align:middle;margin-right:5px;"></span>DEM 河道網</div>
+      <div><span style="display:inline-block;width:13px;height:13px;background:#f97316;border-radius:50%;vertical-align:middle;margin-right:5px;"></span>河道起點（可拖曳）</div></details>`;
+    return d;
+  };
+  lg.addTo(map);
+
+  // 10. 下拉選項完整文字提示 + KPI 收合
+  document.querySelectorAll('select').forEach(sel => {
+    const tip = () => { sel.title = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : ''; };
+    Array.from(sel.options).forEach(o => { o.title = o.text; });
+    sel.addEventListener('change', tip); tip();
+  });
+  try {
+    const grid = document.getElementById('ui_A_ha').closest('.grid-4'), coord = document.getElementById('ui_OutletCoord').closest('.metric');
+    const btn = document.createElement('button'); btn.className = 'secondary'; btn.style.cssText = 'width:auto;margin:0 0 6px 0;padding:3px 10px;font-size:13px;';
+    btn.textContent = '▼ 收合集水區指標'; let open = true;
+    btn.addEventListener('click', () => { open = !open; grid.style.display = open ? '' : 'none'; coord.style.display = open ? '' : 'none'; btn.textContent = open ? '▼ 收合集水區指標' : '▶ 展開集水區指標'; });
+    coord.parentNode.insertBefore(btn, coord);
+  } catch (e) { console.warn(e); }
+
+  // 11. DEM 載入遮罩
+  const ov = document.createElement('div'); ov.id = 'demLoading';
+  ov.style.cssText = 'position:absolute;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.55);font-size:20px;font-weight:bold;color:#0f172a;pointer-events:all;';
+  ov.innerHTML = '<div style="background:#fff;padding:18px 28px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.3);">⏳ DEM 載入與水文網格計算中，請稍候…</div>';
+  map.getContainer().appendChild(ov);
+  let busy = 0;
+  window.__demBusy = (on, msg) => { busy = Math.max(0, busy + (on ? 1 : -1)); ov.style.display = busy ? 'flex' : 'none'; if (on && msg) ov.firstChild.textContent = '⏳ ' + msg; };
+})();
+(function () {
+  const orig = loadDEMByCenterAndRange;
+  loadDEMByCenterAndRange = async function (...a) { window.__demBusy(true, 'AWS DEM 圖磚下載與水文網格計算中，請稍候…'); try { return await orig.apply(this, a); } finally { window.__demBusy(false); } };
+
+  // 12. 自備 DEM
+  function loadScript(src) { return new Promise((res, rej) => { const t = document.createElement('script'); t.src = src; t.onload = res; t.onerror = () => rej(new Error('無法載入 ' + src)); document.head.appendChild(t); }); }
+  function parseAsc(txt) {
+    const m = {}; let pos = 0;
+    for (let k = 0; k < 6; k++) { let e = txt.indexOf('\n', pos); if (e < 0) e = txt.length; const parts = txt.slice(pos, e).trim().split(/\s+/); m[parts[0].toLowerCase()] = parseFloat(parts[1]); pos = e + 1; }
+    if (m.ncols == null && m.nrows == null) throw new Error('ASCII Grid 標頭格式不正確');
+    const w = m.ncols, h = m.nrows, cs = m.cellsize;
+    const x0 = m.xllcorner != null ? m.xllcorner : m.xllcenter - cs / 2, yb = m.yllcorner != null ? m.yllcorner : m.yllcenter - cs / 2;
+    const nd = m.nodata_value != null ? m.nodata_value : -9999;
+    const data = new Float32Array(w * h), body = txt.slice(pos); let i = 0, a = 0;
+    const re = /\S+/g; let mm; while ((mm = re.exec(body)) && i < data.length) data[i++] = parseFloat(mm[0]);
+    return { w, h, data, x0, y0: yb + h * cs, cx: cs, cy: cs, nodata: nd, epsg: null };
+  }
+  async function parseTif(buf) {
+    if (typeof GeoTIFF === 'undefined') await loadScript('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js');
+    const tiff = await GeoTIFF.fromArrayBuffer(buf), img = await tiff.getImage();
+    const [x0, , x1, y1] = img.getBoundingBox(), w = img.getWidth(), h = img.getHeight(), gk = img.getGeoKeys ? img.getGeoKeys() : {};
+    const r = await img.readRasters({ interleave: false });
+    const nd = img.getGDALNoData ? img.getGDALNoData() : null;
+    return { w, h, data: r[0], x0, y0: y1, cx: (x1 - x0) / w, cy: Math.abs((img.getBoundingBox()[3] - img.getBoundingBox()[1]) / h), nodata: nd == null ? -9999 : nd, epsg: gk.ProjectedCSTypeGeoKey || gk.GeographicTypeGeoKey || null };
+  }
+  async function loadCustomDEM(file) {
+    window.__demBusy(true, '讀取自備 DEM 並計算水文網格，請稍候…');
+    try {
+      await new Promise(r => setTimeout(r, 30));
+      const nm = file.name.toLowerCase();
+      const src = /\.(asc|txt)$/.test(nm) ? parseAsc(await file.text()) : await parseTif(await file.arrayBuffer());
+      const geo = (Math.abs(src.x0) <= 180 && Math.abs(src.y0) <= 90) || [4326, 3824, 4979].includes(src.epsg);
+      let crs = geo ? 'EPSG:4326' : 'EPSG:3826';
+      const xr = src.x0 + src.w * src.cx, yb = src.y0 - src.h * src.cy;
+      if (!geo) {
+        if (src.epsg === 3827 || proj4('EPSG:3826', 'EPSG:4326', [(src.x0 + xr) / 2, (src.y0 + yb) / 2])[0] < 119.8) crs = 'EPSG:3827';
+        if (src.epsg === 3828 || src.epsg === 3829) throw new Error('偵測為 TWD67 座標，請於 QGIS 轉為 TWD97（EPSG:3826）後再上傳');
+      }
+      const toLL = (x, y) => geo ? [x, y] : proj4(crs, 'EPSG:4326', [x, y]);
+      const cs = [toLL(src.x0, src.y0), toLL(xr, src.y0), toLL(src.x0, yb), toLL(xr, yb)];
+      const lonMin = Math.min(...cs.map(c => c[0])), lonMax = Math.max(...cs.map(c => c[0])), latMin = Math.min(...cs.map(c => c[1])), latMax = Math.max(...cs.map(c => c[1]));
+      let zoom = 13, txMin, tyMin, W, H;
+      for (; zoom >= 11; zoom--) {
+        txMin = lon2tile(lonMin, zoom); tyMin = lat2tile(latMax, zoom);
+        W = (lon2tile(lonMax, zoom) - txMin + 1) * 256; H = (lat2tile(latMin, zoom) - tyMin + 1) * 256;
+        if (W * H <= 6.5e6) break;
+      }
+      if (W * H > 6.5e6) throw new Error('DEM 範圍過大，請先於 QGIS 裁切成集水區附近約 25×25 km 再上傳');
+      // 以每 16 像素的格點計算座標，其間線性內插（避免逐點投影過慢）
+      const S = 16, gw = Math.ceil(W / S) + 1, gh = Math.ceil(H / S) + 1, gx = new Float64Array(gw * gh), gy = new Float64Array(gw * gh);
+      for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+        const lon = tile2lon(txMin + (i * S) / 256, zoom), lat = tile2lat(tyMin + (j * S) / 256, zoom);
+        const q = geo ? [lon, lat] : proj4('EPSG:4326', crs, [lon, lat]); gx[j * gw + i] = q[0]; gy[j * gw + i] = q[1];
+      }
+      const raw = new Float32Array(W * H); let vmin = Infinity;
+      const isND = v => !isFinite(v) || v === src.nodata || v < -500 || v > 9000;
+      for (let r = 0; r < H; r++) {
+        const j = Math.floor(r / S), fy = (r - j * S) / S;
+        for (let c = 0; c < W; c++) {
+          const i = Math.floor(c / S), fx = (c - i * S) / S, a = j * gw + i;
+          const x = (gx[a] * (1 - fx) + gx[a + 1] * fx) * (1 - fy) + (gx[a + gw] * (1 - fx) + gx[a + gw + 1] * fx) * fy;
+          const y = (gy[a] * (1 - fx) + gy[a + 1] * fx) * (1 - fy) + (gy[a + gw] * (1 - fx) + gy[a + gw + 1] * fx) * fy;
+          const sc = Math.floor((x - src.x0) / src.cx), sr = Math.floor((src.y0 - y) / src.cy);
+          let v = NaN;
+          if (sc >= 0 && sc < src.w && sr >= 0 && sr < src.h) { v = src.data[sr * src.w + sc]; if (isND(v)) v = NaN; }
+          raw[r * W + c] = v; if (v < vmin) vmin = v;
+        }
+      }
+      if (!isFinite(vmin)) throw new Error('DEM 內沒有有效高程值');
+      const fill = vmin - 10; let nan = 0; for (let i = 0; i < raw.length; i++) if (isNaN(raw[i])) { raw[i] = fill; nan++; }
+      const rangeKm = Math.max((lonMax - lonMin) * 111.32 * Math.cos((latMin + latMax) / 2 * Math.PI / 180), (latMax - latMin) * 110.57);
+      document.getElementById('demResBadge').textContent = `自備 DEM（Z=${zoom}）`;
+      const ok = await buildDemFromRaw(raw, W, H, zoom, txMin, tyMin, rangeKm, '自備 DEM：' + file.name);
+      if (ok && demState) {
+        demState.custom = true;
+        map.fitBounds([[latMin, lonMin], [latMax, lonMax]]);
+        if (nan > raw.length * 0.02) setStatus(`✅ 自備 DEM 已載入，但約 ${(nan / raw.length * 100).toFixed(0)}% 範圍超出檔案或為無值，已視為低地出口；請確認集水區位於資料範圍內。`, 'warn');
+      }
+    } catch (e) { setStatus('⛔ 自備 DEM 讀取失敗：' + e.message, 'error'); }
+    finally { window.__demBusy(false); }
+  }
+  document.getElementById('customDemFile').addEventListener('change', e => { const f = e.target.files[0]; if (f) loadCustomDEM(f); e.target.value = ''; });
 })();
 </script>
 </body>
