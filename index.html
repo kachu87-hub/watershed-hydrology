@@ -26,6 +26,11 @@
     .leaflet-bottom.leaflet-left .leaflet-control-scale { margin-bottom: 4px; }
     .coord-readout { max-width: 62vw; white-space: normal; background: rgba(15,23,42,.88); color: #e2e8f0; padding: 4px 9px; border: 1px solid #475569; border-radius: 6px; font: 12.5px/1.5 Consolas, "Microsoft JhengHei", monospace; pointer-events: none; white-space: nowrap; }
     .coord-readout b { color: #7dd3fc; }
+    #thiessenBody [style*="#4ade80"] { color: #15803d !important; }
+    #thiessenBody [style*="#f87171"] { color: #b91c1c !important; }
+    #thiessenBody [style*="#fbbf24"] { color: #b45309 !important; }
+    #thiessenBody [style*="#38bdf8"] { color: #0369a1 !important; }
+    #thiessenBody [style*="#94a3b8"] { color: #475569 !important; }
     .map-legend { background: rgba(255,255,255,.92); color: #0f172a; padding: 6px 10px; border: 1px solid #94a3b8; border-radius: 6px; font: 12.5px/1.7 "Microsoft JhengHei", sans-serif; }
     .map-legend summary { cursor: pointer; font-weight: bold; }
     select { text-overflow: ellipsis; }
@@ -220,7 +225,7 @@
 
   <!-- Step 2 & 3: CODiS 測站徐昇權重與「日資料 + 時資料」雙軌上傳 -->
   <div class="card">
-    <h3><span>① 雨量站徐昇權重 (選用站自動重切100%)</span><span class="badge">動態重切徐昇圖</span></h3>
+    <h3><span>② 雨量站徐昇權重 (選用站自動重切100%)</span><span class="badge">動態重切徐昇圖</span></h3>
     <label style="display:flex; align-items:center; gap:6px; margin:0 0 6px 0; color:#d8b4fe;">
       <input type="checkbox" id="chkWraStations" checked style="width:auto; margin:0;" /> 顯示並列入水利署雨量站（紫色點，219 站，含台電站；114 年水文年報站籍）
     </label>
@@ -2774,7 +2779,7 @@ function refreshThiessenUI() {
     const needUpload = st.checked && !stationHasData(st);
     const tr = document.createElement('tr');
     if (!st.checked) tr.style.opacity = "0.55";
-    if (needUpload) tr.style.background = "#450a0a";
+    if (needUpload) tr.style.background = "#fee2e2";
     tr.innerHTML = `
       <td style="text-align:center;"><input type="checkbox" class="chk-st" data-idx="${idx}" ${st.checked ? 'checked' : ''} style="width:auto;margin:0;"/></td>
       <td><strong>${st.name}</strong>${mergeNoteHTML(st)}${(() => { const r = stationRecommend(st); return `<div style="font-size:10px;color:${r.ok === true ? '#4ade80' : r.ok === false ? '#f87171' : '#fbbf24'};">${r.text}${st._expanded ? `（擴大搜尋，距集水區 ${st._distKm.toFixed(1)} km）` : ''}</div>`; })()}${isWraStation(st) ? ` <span style="color:#d8b4fe;font-size:10.5px;">[${st.org === '台灣電力公司' ? '台電' : '水利署'}]</span>` : ''}${st.withdrawn ? ' <span style="color:#f59e0b;font-size:10.5px;">(撤銷站)</span>' : ''} <span style="color:#94a3b8;font-size:10px;">(${st.id})</span>${st.groupSize > 1 ? '<div style="color:#94a3b8;font-size:10px;">同位置遷站/汰換站，與同座標站平分此徐昇區</div>' : ''}${needUpload ? `<div style="color:#fca5a5;font-size:10.5px;">⚠ 需先上傳此站雨量 Excel（${isWraStation(st) ? '水利署年報轉出檔' : 'CODiS'}），或取消勾選</div>` : ''}</td>
@@ -4138,8 +4143,9 @@ function cleanStationDB(st, useList, cs) {
 
 // 年最大值離群檢定（USGS Bulletin 17B，對數、單側 10% 顯著水準；Kn 為 17B 近似式）
 function knValue(n) { return -3.62201 + 6.28446 * Math.pow(n, 0.25) - 2.49835 * Math.pow(n, 0.5) + 0.491436 * Math.pow(n, 0.75) - 0.037911 * n; }
-let OL_KEEP = new Set(), olKeepVer = -1;
-function screenOutliers(years, sample, keepSet, on) {
+let OL_KEEP = new Set(), OL_DROP = new Set(), olKeepVer = -1;
+function screenOutliers(years, sample, keepSet, on, dropSet) {
+  dropSet = dropSet || new Set();
   const n = sample.length;
   const base = { years, sample, all: { years, sample }, flagged: [], tested: false, n, kn: null };
   if (!on) return { ...base, note: "未啟用資料整理，不做離群檢定。" };
@@ -4152,7 +4158,7 @@ function screenOutliers(years, sample, keepSet, on) {
   sample.forEach((x, i) => {
     const type = lg[i] > hiL ? "高" : lg[i] < loL ? "低" : null;
     if (type) {
-      const keep = keepSet.has(String(years[i]));
+      const keep = type === "高" ? !dropSet.has(String(years[i])) : keepSet.has(String(years[i]));
       flagged.push({ year: years[i], value: x, type, removed: !keep });
       if (keep) { ys.push(years[i]); ss.push(x); }
     } else { ys.push(years[i]); ss.push(x); }
@@ -4190,7 +4196,7 @@ function cleanSummaryHTML(clean, screen, forReport) {
         : `<tr><td colspan="${forReport ? 4 : 5}" style="text-align:center;">無離群值</td></tr>`;
       ol = `<div style="margin:6px 0;"><strong>年最大 24hr 離群檢定（Bulletin 17B）：</strong>n = ${screen.n}，log₁₀ 平均 ${screen.mean.toFixed(4)}，標準差 ${screen.sd.toFixed(4)}，K<sub>n</sub> = ${screen.kn.toFixed(3)}，容許範圍 ${screen.lo.toFixed(1)} ～ ${screen.hi.toFixed(1)} mm。
         <table ${forReport ? 'border="1"' : 'style="width:100%;border-collapse:collapse;font-size:11px;" border="1"'}><thead><tr><th>年份</th><th>24hr 雨量 (mm)</th><th>判定</th><th>處理</th>${forReport ? '' : '<th>保留</th>'}</tr></thead><tbody>${fl}</tbody></table>
-        <div style="font-size:0.9em;">高、低離群值預設剔除；高離群值若確認為真實颱風暴雨，可勾選「保留」（Bulletin 17B 建議高離群值需以歷史資料或鄰近站比對後再決定）。</div></div>`;
+        <div style="font-size:0.9em;">低離群值預設剔除；高離群值預設保留（多屬真實極端颱風暴雨，Bulletin 17B 建議以歷史資料或鄰近站比對確認非觀測誤差）；如確認為觀測錯誤，可取消勾選「保留」予以剔除。</div></div>`;
     } else ol = `<div style="margin:6px 0;">${screen.note}</div>`;
   }
   const tb = forReport ? 'border="1"' : 'style="width:100%;border-collapse:collapse;font-size:11px;" border="1"';
@@ -4210,7 +4216,7 @@ function renderCleanPanel(basis, screen) {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t && t.classList && t.classList.contains('ol-keep')) {
-    if (t.checked) OL_KEEP.add(String(t.dataset.year)); else OL_KEEP.delete(String(t.dataset.year));
+    { const yk = String(t.dataset.year); if (t.checked) { OL_KEEP.add(yk); OL_DROP.delete(yk); } else { OL_KEEP.delete(yk); OL_DROP.add(yk); } }
     runFrequencyAndHydrology();
   }
 });
@@ -4343,6 +4349,20 @@ function buildBasinRainBasis(useList) {
     res.sample24 = res.years.map(yr => +(yearMap[yr].sum / yearMap[yr].w).toFixed(1));
     res.methodNote = "部分採用站為程式內建舊資料（僅保存各站年最大值，無逐日/逐時資料），改以各站年最大值依權重加權，未做一日→24 小時換算；請上傳各站 CODiS Excel 以改用同一天加權法。";
   }
+  // 序列組成：各站資料年份（僅在有資料之年份混入該站，其餘年份由有資料之站權重重新正規化）
+  try {
+    const yrSet = new Set(res.years.map(String));
+    res.mixInfo = all.map(x => {
+      const ys = [...dbYearSet(x.db)].filter(y => yrSet.has(y)).sort();
+      return { id: x.st.id, name: x.st.name, withdrawn: !!x.st.withdrawn, weight: x.w, years: ys, n: ys.length };
+    });
+    const nAll = yrSet.size, part = res.mixInfo.filter(m => m.n > 0 && m.n < nAll);
+    if (part.length && nAll > 0) {
+      const txt = '【序列組成說明】' + part.map(m => `${m.name}${m.withdrawn ? '(撤銷站)' : ''}（徐昇權重 ${(m.weight * 100).toFixed(1)}%）僅有 ${m.n} 年資料${m.n <= 6 ? '（' + m.years.join('、') + '）' : '（' + m.years[0] + '～' + m.years[m.years.length - 1] + '）'}`).join('；') +
+        `；該站僅於有資料之年份依徐昇權重混入流域序列，其餘年份由其餘有資料之站權重重新正規化（合計 100%）。故各年度之站別組成並不一致，請注意序列均質性。`;
+      res.mixNote = txt; res.methodNote += txt;
+    }
+  } catch (e) { }
   basinRainCache = { key, val: res };
   return res;
 }
@@ -4498,7 +4518,7 @@ function computeStationFrequencies(useList, convInfo) {
       method = "內建年最大值（舊資料）";
     }
     const scr = screenOutliers(years, sample, new Set(), csX.on);
-    if (scr.tested) { years = scr.years; sample = scr.sample; if (scr.flagged.length) note = `已剔除離群值：${scr.flagged.map(f => f.year + '(' + f.value.toFixed(0) + ')').join('、')}`; }
+    if (scr.tested) { years = scr.years; sample = scr.sample; if (scr.flagged.length) note = `已處理離群值：${scr.flagged.map(f => f.year + '(' + f.value.toFixed(0) + ')').join('、')}`; }
     let freq = null;
     if (sample.length >= 8) { try { freq = analyzeStandardFrequency(sample); } catch (e) { note = "頻率分析失敗：" + e.message; } }
     else note = `樣本僅 ${sample.length} 年，不足 8 年，不做頻率分析`;
@@ -4932,8 +4952,8 @@ function runFrequencyAndHydrology() {
   document.getElementById('input_MeanAnnualP').value = meanP;
 
   const basis = buildBasinRainBasis(useList);
-  if (olKeepVer !== rainDataVersion) { OL_KEEP = new Set(); olKeepVer = rainDataVersion; }
-  const screen = screenOutliers(basis.years, basis.sample24, OL_KEEP, basis.clean.cs.on);
+  if (olKeepVer !== rainDataVersion) { OL_KEEP = new Set(); OL_DROP = new Set(); olKeepVer = rainDataVersion; }
+  const screen = screenOutliers(basis.years, basis.sample24, OL_KEEP, basis.clean.cs.on, OL_DROP);
   const amsYears = screen.years;
   const sample24 = screen.sample;
   renderCleanPanel(basis, screen);
@@ -5135,15 +5155,15 @@ function runFrequencyAndHydrology() {
 
   const peakBody = document.getElementById('peakSummaryBody');
   peakBody.innerHTML = `
-    <tr style="${!isLarge ? 'background:#064e3b;' : ''}">
+    <tr style="${!isLarge ? 'background:#d1fae5;color:#064e3b;font-weight:bold;' : ''}">
       <td><strong>合理化公式配合無因次強度 (合-無)</strong></td>
       ${rowRat.map(q => `<td>${q.toFixed(2)}</td>`).join('')}
     </tr>
-    <tr style="${isLarge ? 'background:#064e3b;' : ''}">
+    <tr style="${isLarge ? 'background:#d1fae5;color:#064e3b;font-weight:bold;' : ''}">
       <td><strong>修正三角型單位歷線配合${stormTagOf(stormTyped).name} (△-${stormTagOf(stormTyped).ab})</strong></td>
       ${rowTri.map(q => `<td>${uhMethod === "TRI" ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}</td>`).join('')}
     </tr>
-    <tr style="${isLarge && uhMethod === "SCS" ? 'background:#064e3b;' : ''}">
+    <tr style="${isLarge && uhMethod === "SCS" ? 'background:#d1fae5;color:#064e3b;font-weight:bold;' : ''}">
       <td><strong>SCS 無因次單位歷線配合${stormTagOf(stormTyped).name} (S-${stormTagOf(stormTyped).ab})${CN_val ? ` [CN=${CN_val}]` : ''}</strong></td>
       ${rowScs.map(q => `<td>${uhMethod === "SCS" ? `<strong>${q.toFixed(2)}</strong>` : q.toFixed(2)}</td>`).join('')}
     </tr>
@@ -5415,7 +5435,13 @@ async function reportPdfMain(fileName) {
     for (let i = 0; i < els.length; i++) {
       btn.textContent = '產生中 ' + (i + 1) + '/' + els.length + '…';
       const c = await html2canvas(els[i], { scale: SC, backgroundColor: '#ffffff', useCORS: true, logging: false });
-      items.push({ el: els[i], c, w: Math.min(CW, c.width / SC * mm), h: c.height / SC * mm });
+      const itm = { el: els[i], c, w: Math.min(CW, c.width / SC * mm), h: c.height / SC * mm, bps: [], headH: 0 };
+      if (els[i].tagName === 'TABLE') {
+        const r0 = els[i].getBoundingClientRect(), th = els[i].querySelector('thead');
+        itm.bps = Array.from(els[i].querySelectorAll('tr')).map(tr => (tr.getBoundingClientRect().bottom - r0.top) * mm);
+        if (th) itm.headH = (th.getBoundingClientRect().bottom - r0.top) * mm;
+      }
+      items.push(itm);
       await new Promise(r => setTimeout(r, 0));
     }
     let y = M, first = true;
@@ -5423,25 +5449,35 @@ async function reportPdfMain(fileName) {
     items.forEach((it, i) => {
       const tag = it.el.tagName, isHead = /^H[1-3]$/.test(tag) || it.el.classList.contains('caption');
       const nxt = items[i + 1];
-      const need = it.h + GAP + (isHead && nxt ? Math.min(nxt.h, 45) : 0);
+      const need = it.h + GAP + (isHead && nxt ? (nxt.h <= CH - it.h - GAP ? nxt.h : Math.min(nxt.h, 45)) : 0);
       if (!first && y > M && y + need > BOT) newPage();
       first = false;
       if (it.h <= CH) {
         pdf.addImage(it.c.toDataURL('image/jpeg', 0.93), 'JPEG', M, y, it.w, it.h);
         y += it.h + GAP;
       } else {
-        const pxPerMm = it.c.height / it.h;
-        let done = 0;
-        while (done < it.h - 0.01) {
-          if (BOT - y < 25) newPage();
-          const take = Math.min(it.h - done, BOT - y);
+        const pxPerMm = it.c.height / it.h, hh = it.headH > 0 && it.headH < 60 ? it.headH : 0;
+        const put = (srcMm, hMm, destY) => {
           const sl = document.createElement('canvas');
-          sl.width = it.c.width; sl.height = Math.max(1, Math.round(take * pxPerMm));
+          sl.width = it.c.width; sl.height = Math.max(1, Math.round(hMm * pxPerMm));
           const g = sl.getContext('2d');
           g.fillStyle = '#fff'; g.fillRect(0, 0, sl.width, sl.height);
-          g.drawImage(it.c, 0, Math.round(done * pxPerMm), it.c.width, sl.height, 0, 0, sl.width, sl.height);
-          pdf.addImage(sl.toDataURL('image/jpeg', 0.93), 'JPEG', M, y, it.w, take);
-          done += take; y += take + GAP;
+          g.drawImage(it.c, 0, Math.round(srcMm * pxPerMm), it.c.width, sl.height, 0, 0, sl.width, sl.height);
+          pdf.addImage(sl.toDataURL('image/jpeg', 0.93), 'JPEG', M, destY, it.w, hMm);
+        };
+        let done = 0, firstSlice = true;
+        while (done < it.h - 0.01) {
+          if (BOT - y < 25) newPage();
+          const useHead = !firstSlice && hh > 0;
+          const avail = BOT - y - (useHead ? hh : 0);
+          let take = Math.min(it.h - done, avail);
+          if (take < it.h - done - 0.01 && it.bps.length) {
+            let best = -1; it.bps.forEach(b => { if (b > done + 8 && b - done <= take + 0.01) best = b; });
+            if (best > 0) take = best - done;
+          }
+          if (useHead) { put(0, hh, y); y += hh; }
+          put(done, take, y);
+          done += take; y += take + GAP; firstSlice = false;
           if (done < it.h - 0.01) newPage();
         }
       }
@@ -6068,6 +6104,9 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     .fig-caption { text-align: center; font-weight: bold; margin-top: 6px; font-size: 13.5px; }
     .toolbar { position: sticky; top: 0; background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-family: sans-serif; z-index: 99; }
     .toolbar button { background: #0284c7; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    .caption, .fig-caption, h3 { break-after: avoid; page-break-after: avoid; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    thead { display: table-header-group; }
     @media print { .toolbar { display: none; } body { margin: 0; padding: 10px; } }
   </style>
 </head>
@@ -6157,9 +6196,10 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
 
   <h3>三、降雨量分析</h3>
   <p>經統計分析選用雨量站歷年降雨紀錄，計畫區徐昇加權年平均降雨量為 <strong>${d.P_annual.toFixed(1)} mm</strong>，歷年最大 24 小時暴雨量彙整詳附錄表 A-5${dataCutoffText(activeStations) ? '（' + dataCutoffText(activeStations) + '）' : ''}。年最大 24 小時暴雨量之推求方式：${d.basis ? d.basis.methodNote : ''}</p>
+  ${d.basis && d.basis.mixNote ? `<p>${d.basis.mixNote}</p>` : ''}
   <div style="margin:8px 0;"><strong>雨量資料整理與離群檢定</strong>${cleanSummaryHTML(d.basis && d.basis.clean, d.screen, true)}</div>
   ${d.basis && d.basis.convInfo ? `<div style="margin:6px 0; font-size:13px;">
-    <strong>表 3-3　台灣地區年最大日暴雨量修正係數（一日→24 小時）</strong>
+    <strong>表 2　台灣地區年最大日暴雨量修正係數（一日→24 小時；引用水利署報告表 3-3）</strong>
     <table style="width:60%; margin:4px 0;"><tr><th>區域</th><th>北</th><th>中</th><th>南</th><th>東</th></tr><tr><td>修正係數</td><td>1.15</td><td>1.14</td><td>1.14</td><td>1.17</td></tr></table>
     <div>出處：${DAYCONV_SOURCE}（係經由規劃報告引用，原報告未逐一核對）。</div>
     <div>本次採用：<strong>${d.basis.convInfo.label}</strong>（${d.basis.convInfo.auto ? '依採用雨量站所在縣市之徐昇權重多數決自動判定' : '使用者手動指定'}；各區權重：${Object.keys(d.basis.convInfo.shares).map(r => r + '區 ' + (d.basis.convInfo.shares[r] * 100).toFixed(0) + '%').join('、') || '無'}）。${d.basis.method === 'daily' ? '本案採日資料推求，已乘上此係數。' : '本案採逐時資料連續 24 小時取最大，未使用此係數。'}縣市→區域歸類為本工具之假設（北＝基隆/臺北/新北/桃園/新竹/苗栗；中＝臺中/彰化/南投/雲林；南＝嘉義/臺南/高雄/屏東；東＝宜蘭/花蓮/臺東）。</div>
@@ -6213,11 +6253,11 @@ document.getElementById('btnGenerateReport').addEventListener('click', async () 
     <tr style="background:#f1f5f9;font-weight:bold;"><td colspan="3" style="text-align:center;">平均值</td><td>${t1.mean.toFixed(2)}</td><td>${t2.mean.toFixed(2)}</td></tr>
     <tr style="background:#f1f5f9;font-weight:bold;"><td colspan="3" style="text-align:center;">中位數</td><td>${t1.med.toFixed(2)}</td><td>${t2.med.toFixed(2)}</td></tr>
   </tbody></table>
-  <p>表 5-5 依逕流分擔技術手冊（II-8）建議，以歷史實測颱洪事件雨型比較，僅作檢核，不改變設計值。實測事件僅有逐時資料，雨型時距為 1 小時，較 Horner 雨型粗，小集水區洪峰可能偏低。</p>`;
+  <p>表 5-5 依逕流分擔技術手冊（II-8）建議，以歷史實測颱洪事件雨型比較，僅作檢核，不改變設計值。實測事件僅有逐時資料，雨型時距為 1 小時，較 Horner 雨型粗，小集水區洪峰可能偏低。另，個別場次之實測 24 小時雨量雖不大，但降雨高度集中於短時段，經套用設計 24 小時雨量放大後，其尖峰流量可能高於總雨量較大之事件，屬雨型集中度差異所致，並非計算異常。</p>`;
   })() : ''}
   <div class="caption">圖 5-3 各雨型 24 小時累積雨量曲線比較（粗黑線＝本次採用）</div>
   <div style="text-align:center;">${cumCompareSVG(d.patternCompare, 640, 330)}</div>
-  <p>雨型僅影響單位歷線法之洪峰；合理化公式以集流時間之降雨強度計算，不受雨型影響。設計採用之雨型為上表第一列，其餘供敏感度比較。<strong>雨型檢核：</strong>「比值」為各雨型在 t<sub>c</sub> 視窗（${d.patternCompare[0].winH < 1 - 1e-9 ? Math.round(d.patternCompare[0].winH * 60) + ' 分鐘' : d.patternCompare[0].winH.toFixed(2) + ' hr'}）內之最大累積雨量，除以同重現期降雨強度公式於該延時之雨量；比值明顯小於 1（本表以 0.85 標示）表示該雨型於關鍵延時內雨量集中度不足，洪峰將低於以 IDF 公式為依據之推估，應謹慎採用。</p>
+  <p>雨型僅影響單位歷線法之洪峰；合理化公式以集流時間之降雨強度計算，不受雨型影響。設計採用之雨型為上表第一列，其餘供敏感度比較。<strong>雨型檢核：</strong>「比值」為各雨型在 t<sub>c</sub> 視窗（${d.patternCompare[0].winH < 1 - 1e-9 ? Math.round(d.patternCompare[0].winH * 60) + ' 分鐘' : d.patternCompare[0].winH.toFixed(2) + ' hr'}）內之最大累積雨量，除以同重現期降雨強度公式於該延時之雨量；比值明顯小於 1（本表以 0.85 為標示門檻，低於 0.85 者以紅字標示；比值介於 0.85～1.00 者視為尚在合理範圍，仍可採用）表示該雨型於關鍵延時內雨量集中度不足，洪峰將低於以 IDF 公式為依據之推估，應謹慎採用。</p>
 
   <h3>六、洪峰流量分析與單位歷線圖</h3>
   <p>本集水區面積為 <strong>${w.A_ha.toFixed(1)} ha</strong>（${isLarge ? '大於 1,000 ha，依水土保持技術規範採用單位歷線法（本次：' + d.uhMethodLabel + '）' : '小於 1,000 ha，依水土保持技術規範採用合理化公式法'}）。天然河段採用芮哈（Rziha）經驗公式估算流下速度 W = 72 × (H/L)<sup>0.6</sup>，集流時間分析成果如表 6 所示；無因次降雨強度分析成果如表 7 所示；修正三角型單位歷線原理與設計洪水歷線如圖 4 及表 8 所示；各重現期距洪峰流量彙整如表 9 所示。</p>
@@ -6774,7 +6814,7 @@ function renderControlPointsOverviewImage(pts) {
     g.lineWidth = 4; g.strokeStyle = '#fff'; g.strokeText(t, x + 9, y - 7); g.fillStyle = '#111'; g.fillText(t, x + 9, y - 7);
   });
   g.font = '14px "Microsoft JhengHei",sans-serif';
-  items.forEach((pt, i) => { const yy = 24 + i * 20; g.fillStyle = pal[i % pal.length]; g.fillRect(14, yy - 12, 16, 14); g.strokeStyle = '#334155'; g.lineWidth = 0.8; g.strokeRect(14, yy - 12, 16, 14); g.fillStyle = '#111'; g.fillText(`${pt.code || ''}　${pt.name}（${pt.d.watershed.A_ha.toFixed(0)} ha）`, 36, yy); });
+  items.forEach((pt, i) => { const yy = 24 + i * 20; g.fillStyle = pal[i % pal.length]; g.fillRect(14, yy - 12, 16, 14); g.strokeStyle = '#334155'; g.lineWidth = 0.8; g.strokeRect(14, yy - 12, 16, 14); g.fillStyle = '#111'; g.fillText(`${pt.code || ''}　${pt.name}（${pt.d.watershed.A_ha.toFixed(1)} ha）`, 36, yy); });
   return cvs.toDataURL('image/png');
 }
 // 多控制點成果內容（獨立報告與完整報告末章共用）；pre＝表圖編號前綴
@@ -6916,9 +6956,11 @@ map.on(L.Draw.Event.CREATED, e => applyWatershedGeometry({ feature: e.layer.toGe
     const pane = document.getElementById('pane_t2');
     if (slot && pane) {
       const card = document.createElement('div'); card.className = 'card'; card.id = 'rainUploadCard';
-      card.innerHTML = '<h3><span>② 雨量資料上傳（請先於 ① 劃定集水區與勾選雨量站）</span></h3>';
+      card.innerHTML = '<h3><span>② 雨量資料上傳（請先於 ① 劃定集水區）</span></h3>';
       card.appendChild(slot);
       pane.insertBefore(card, pane.firstChild);
+      const stCard = document.getElementById('thiessenBody').closest('.card');
+      if (stCard) { pane.insertBefore(stCard, card.nextSibling); }
     }
   } catch (e) { console.warn(e); }
 
