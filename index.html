@@ -5502,7 +5502,7 @@ function pdfBlockHTML(fileName) {
 
 async function renderWatershedMapImageForReport(d) {
   const cvs = document.createElement('canvas');
-  cvs.width = 860; cvs.height = 560;
+  cvs.width = 860; cvs.height = 600;
   const ctx = cvs.getContext('2d');
   ctx.fillStyle = "#f8fafc";
   ctx.fillRect(0, 0, cvs.width, cvs.height);
@@ -5834,17 +5834,16 @@ async function renderWatershedMapImageForReport(d) {
     ctx.font = "bold 13px sans-serif"; ctx.fillText("N", nx, ny + 42);
   }
 
-  // 7. 圖例說明框
-  ctx.fillStyle = "rgba(255,255,255,0.94)";
-  ctx.fillRect(plotX + 12, plotY + plotH - 84, 260, 72);
-  ctx.strokeStyle = "#334155"; ctx.lineWidth = 1.2;
-  ctx.strokeRect(plotX + 12, plotY + plotH - 84, 260, 72);
+  // 7. 圖例說明框（置於圖框外下方，避免遮住底圖）
+  const lgY = plotY + plotH + 34;
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(plotX, lgY, plotW, 50);
+  ctx.strokeStyle = "#334155"; ctx.lineWidth = 1.2; ctx.strokeRect(plotX, lgY, plotW, 50);
   ctx.fillStyle = "#0f172a"; ctx.textAlign = "left";
   ctx.font = "bold 12px Microsoft JhengHei";
-  ctx.fillText("圖例說明 (TWD97 座標・等高線地形圖)", plotX + 20, plotY + plotH - 64);
+  ctx.fillText("圖例說明 (TWD97 座標・等高線地形圖)", plotX + 10, lgY + 18);
   ctx.font = "11.5px Microsoft JhengHei";
-  ctx.fillText("● 集水區控制點 (出水口) 與主河道", plotX + 20, plotY + plotH - 44);
-  ctx.fillText("🟠 選用雨量站與 100% 徐昇多邊形控制區", plotX + 20, plotY + plotH - 24);
+  ctx.fillText("● 集水區控制點 (出水口) 與主河道", plotX + 10, lgY + 38);
+  ctx.fillText("🟠 選用雨量站與 100% 徐昇多邊形控制區", plotX + 330, lgY + 38);
 
   return cvs.toDataURL("image/png");
 }
